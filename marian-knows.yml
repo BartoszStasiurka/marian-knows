@@ -1,0 +1,5 @@
+sources:
+  /:
+    path: ./docs
+  /README.md:
+    path: ./README.md
