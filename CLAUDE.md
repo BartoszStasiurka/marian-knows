@@ -12,6 +12,7 @@ Node.js 20+, ESM, TypeScript strict. Full spec: `docs/requirements.md` (Polish, 
 - Ask before adding a dependency. Current deps: `yaml`, `zod`, `fast-glob`.
 - Config file name: `marian-knows.yml`. Env: `MARIAN_KNOWS_CONFIG`. DB: `marian-knows.db` next to the config.
 - Tests use temp dirs (`test/helpers.ts`), never real user paths.
+- Do not commit without request.
 
 ## Commands
 
