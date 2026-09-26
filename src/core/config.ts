@@ -3,31 +3,34 @@ import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { ConfigError } from "./errors.js";
-import type { LoadedConfig, Mount } from "./types.js";
-import { validateVirtualPath } from "./virtual-path.js";
+import type { LoadedConfig } from "./types.js";
+import { CONTROL_CHARS } from "./virtual-path.js";
 
 export const CONFIG_FILENAME = "marian-knows.yml";
 export const CONFIG_ENV = "MARIAN_KNOWS_CONFIG";
-
-const SourceSchema = z
-  .object({
-    path: z.string().min(1),
-    recursive: z.boolean().default(true),
-    exclude: z.union([z.string(), z.array(z.string())]).optional(),
-  })
-  .strict();
+export const MAX_NAME_LENGTH = 128;
 
 const ConfigSchema = z
   .object({
-    sources: z
-      .record(z.string(), SourceSchema)
-      .refine((s) => Object.keys(s).length > 0, "must contain at least one source"),
+    name: z.string(),
+    path: z.string().min(1).optional(),
+    exclude: z.union([z.string(), z.array(z.string())]).optional(),
   })
   .strict();
 
 function formatIssue(issue: z.ZodIssue): string {
   const where = issue.path.length ? issue.path.map(String).join(" > ") : "(root)";
   return `${where}: ${issue.message}`;
+}
+
+/** Validates a project name after trimming. Returns a list of problems; empty list means valid. */
+export function validateProjectName(raw: string): string[] {
+  const name = raw.trim();
+  const errors: string[] = [];
+  if (name.length === 0) errors.push("must not be empty");
+  if (name.length > MAX_NAME_LENGTH) errors.push(`longer than ${MAX_NAME_LENGTH} characters`);
+  if (CONTROL_CHARS.test(name)) errors.push("must not contain control characters");
+  return errors;
 }
 
 /** Config lookup order: --config, env, then marian-knows.yml walking up from cwd. */
@@ -71,64 +74,37 @@ export function loadConfig(configPath: string): LoadedConfig {
     throw new ConfigError([`invalid YAML: ${(e as Error).message}`]);
   }
 
+  if (data !== null && typeof data === "object" && "sources" in data) {
+    throw new ConfigError(["sources: no longer supported; use name, path and exclude"]);
+  }
+
   const parsed = ConfigSchema.safeParse(data);
   if (!parsed.success) throw new ConfigError(parsed.error.issues.map(formatIssue));
 
   const errors: string[] = [];
-  const seenLower = new Map<string, string>();
-  const mounts: Mount[] = [];
+  for (const problem of validateProjectName(parsed.data.name)) errors.push(`name: ${problem}`);
 
-  for (const [key, src] of Object.entries(parsed.data.sources)) {
-    const label = `source "${key}"`;
-
-    for (const problem of validateVirtualPath(key)) errors.push(`${label}: ${problem}`);
-
-    const lower = key.toLowerCase();
-    const clash = seenLower.get(lower);
-    if (clash !== undefined) {
-      errors.push(`${label}: conflicts with "${clash}" (keys are unique ignoring case)`);
-    } else {
-      seenLower.set(lower, key);
+  const sourceDir = path.resolve(configDir, parsed.data.path ?? ".");
+  let sourceExists = false;
+  try {
+    const st = statSync(sourceDir);
+    sourceExists = true;
+    if (!st.isDirectory()) errors.push(`path: not a directory: ${sourceDir}`);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
+      errors.push(`path: cannot access directory (${(e as Error).message})`);
     }
-
-    const kind = key.endsWith("/") ? "dir" : "file";
-    const diskPath = path.resolve(configDir, src.path);
-
-    if (kind === "file" && !diskPath.toLowerCase().endsWith(".md")) {
-      errors.push(`${label}: a file source must point to a .md file`);
-    }
-
-    let exists = false;
-    try {
-      const st = statSync(diskPath);
-      exists = true;
-      if (kind === "dir" && !st.isDirectory()) {
-        errors.push(`${label}: key ends with '/' but path is not a directory`);
-      }
-      if (kind === "file" && !st.isFile()) {
-        errors.push(`${label}: key does not end with '/' but path is not a file`);
-      }
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
-        errors.push(`${label}: cannot access path (${(e as Error).message})`);
-      }
-    }
-
-    mounts.push({
-      key,
-      kind,
-      diskPath,
-      exists,
-      recursive: src.recursive,
-      exclude:
-        src.exclude === undefined
-          ? []
-          : typeof src.exclude === "string"
-            ? [src.exclude]
-            : src.exclude,
-    });
   }
 
   if (errors.length) throw new ConfigError(errors);
-  return { configPath: absConfig, configDir, mounts };
+
+  const { exclude } = parsed.data;
+  return {
+    configPath: absConfig,
+    configDir,
+    name: parsed.data.name.trim(),
+    sourceDir,
+    sourceExists,
+    exclude: exclude === undefined ? [] : typeof exclude === "string" ? [exclude] : exclude,
+  };
 }

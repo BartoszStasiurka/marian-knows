@@ -1,151 +1,153 @@
 import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadConfig, scanMounts } from "../src/core/index.js";
+import { loadConfig, scanSource } from "../src/core/index.js";
 import { makeTree } from "./helpers.js";
 
 async function scan(dir: string, yaml: string) {
   const file = path.join(dir, "marian-knows.yml");
   writeFileSync(file, yaml);
-  return scanMounts(loadConfig(file).mounts);
+  return scanSource(loadConfig(file));
 }
 
 const paths = (r: { files: { virtualPath: string }[] }) => r.files.map((f) => f.virtualPath);
 
-describe("scanMounts", () => {
-  it("scans a recursive directory and maps to virtual paths", async () => {
-    const dir = makeTree({ "docs/a.md": "", "docs/sub/b.md": "", "docs/ignored.txt": "" });
-    const r = await scan(dir, "sources:\n  /:\n    path: ./docs\n");
-    expect(paths(r)).toEqual(["/a.md", "/sub/b.md"]);
-    expect(r.files[0]!.diskPath).toBe(path.join(dir, "docs", "a.md"));
+/** True when the filesystem keeps names that differ only by case apart. */
+function caseSensitiveFs(dir: string): boolean {
+  const probe = path.join(dir, "probe");
+  mkdirSync(probe);
+  writeFileSync(path.join(probe, "a"), "");
+  writeFileSync(path.join(probe, "A"), "");
+  return readdirSync(probe).length === 2;
+}
+
+describe("scanSource", () => {
+  it("scans recursively and maps paths relative to path", async () => {
+    const dir = makeTree({ "docs/api/readme.md": "", "docs/a.md": "", "docs/x/y/z/deep.md": "" });
+    const r = await scan(dir, "name: T\npath: ./docs\n");
+    expect(paths(r)).toEqual(["/a.md", "/api/readme.md", "/x/y/z/deep.md"]);
+    expect(r.files.find((f) => f.virtualPath === "/api/readme.md")!.diskPath).toBe(
+      path.join(dir, "docs", "api", "readme.md"),
+    );
+    expect(r.warnings).toEqual([]);
   });
 
-  it("respects recursive: false", async () => {
-    const dir = makeTree({ "d/a.md": "", "d/sub/b.md": "" });
-    const r = await scan(dir, "sources:\n  /d/:\n    path: ./d\n    recursive: false\n");
-    expect(paths(r)).toEqual(["/d/a.md"]);
+  it("defaults to the config directory", async () => {
+    const dir = makeTree({ "README.md": "", "notes/n.md": "" });
+    const r = await scan(dir, "name: T\n");
+    expect(paths(r)).toEqual(["/README.md", "/notes/n.md"]);
+  });
+
+  it("picks up only .md files", async () => {
+    const dir = makeTree({ "d/a.md": "", "d/b.txt": "", "d/c.markdown": "", "d/md": "" });
+    const r = await scan(dir, "name: T\npath: ./d\n");
+    expect(paths(r)).toEqual(["/a.md"]);
   });
 
   it("applies exclude globs relative to path", async () => {
-    const dir = makeTree({ "d/a.md": "", "d/legacy/old.md": "", "d/x/legacy/old2.md": "" });
-    const r = await scan(dir, `sources:\n  /d/:\n    path: ./d\n    exclude: ["**/legacy/**"]\n`);
-    expect(paths(r)).toEqual(["/d/a.md"]);
+    const dir = makeTree({
+      "d/a.md": "",
+      "d/draft/x.md": "",
+      "d/sub/draft/y.md": "",
+      "d/draft.md": "",
+    });
+    const r = await scan(dir, 'name: T\npath: ./d\nexclude: "**/draft/**"\n');
+    expect(paths(r)).toEqual(["/a.md", "/draft.md"]);
   });
 
-  it("skips hidden entries and node_modules", async () => {
+  it("anchors exclude globs at path, not at the config directory", async () => {
+    const dir = makeTree({ "d/keep/a.md": "", "d/skip/b.md": "" });
+    const r = await scan(dir, 'name: T\npath: ./d\nexclude: ["skip/**", "d/keep/**"]\n');
+    expect(paths(r)).toEqual(["/keep/a.md"]);
+  });
+
+  it("always skips hidden entries and node_modules", async () => {
     const dir = makeTree({
       "d/a.md": "",
       "d/.hidden.md": "",
       "d/.git/x.md": "",
+      "d/sub/.cache/y.md": "",
       "d/node_modules/pkg/readme.md": "",
+      "d/sub/node_modules/z.md": "",
     });
-    const r = await scan(dir, "sources:\n  /d/:\n    path: ./d\n");
-    expect(paths(r)).toEqual(["/d/a.md"]);
+    const r = await scan(dir, 'name: T\npath: ./d\nexclude: "nothing/**"\n');
+    expect(paths(r)).toEqual(["/a.md"]);
   });
 
   it("skips files over 1 MB with a warning", async () => {
-    const dir = makeTree({ "d/small.md": "x", "d/big.md": "a".repeat(1024 * 1024 + 1) });
-    const r = await scan(dir, "sources:\n  /d/:\n    path: ./d\n");
-    expect(paths(r)).toEqual(["/d/small.md"]);
-    expect(r.warnings.some((w) => w.includes("/d/big.md") && w.includes("1 MB"))).toBe(true);
-  });
-
-  it("skips names containing # or ?", async () => {
-    const dir = makeTree({ "d/ok.md": "", "d/c#.md": "" });
-    const r = await scan(dir, "sources:\n  /d/:\n    path: ./d\n");
-    expect(paths(r)).toEqual(["/d/ok.md"]);
-    expect(r.warnings.some((w) => w.includes("'#' or '?'"))).toBe(true);
-  });
-
-  it("supports single-file mounts", async () => {
-    const dir = makeTree({ "README.md": "# hi" });
-    const r = await scan(dir, "sources:\n  /README.md:\n    path: ./README.md\n");
-    expect(paths(r)).toEqual(["/README.md"]);
-  });
-
-  it("normalizes file names to NFC", async () => {
-    const nfd = "zo\u0301łw.md"; // "ó" as o + combining acute
-    const dir = makeTree({ [`d/${nfd}`]: "" });
-    const r = await scan(dir, "sources:\n  /d/:\n    path: ./d\n");
-    expect(paths(r)).toEqual(["/d/zółw.md"]);
-  });
-
-  it("warns about missing paths and empty mounts", async () => {
-    const dir = makeTree({ "empty/readme.txt": "" });
-    const r = await scan(
-      dir,
-      "sources:\n  /nope/:\n    path: ./nope\n  /empty/:\n    path: ./empty\n",
-    );
-    expect(r.files).toEqual([]);
-    expect(r.warnings.some((w) => w.includes("/nope/") && w.includes("does not exist"))).toBe(true);
-    expect(r.warnings.some((w) => w.includes("/empty/") && w.includes("no matching files"))).toBe(true);
-  });
-
-  it("sorts output by virtual path", async () => {
-    const dir = makeTree({ "d/b.md": "", "d/a.md": "", "d/c/z.md": "" });
-    const r = await scan(dir, "sources:\n  /:\n    path: ./d\n");
-    expect(paths(r)).toEqual(["/a.md", "/b.md", "/c/z.md"]);
-  });
-});
-
-describe("mount overlap", () => {
-  it("longest prefix wins and shadowed files are counted", async () => {
     const dir = makeTree({
-      "all/server/x.md": "from root",
-      "all/server/y.md": "from root",
-      "all/other.md": "",
-      "srv/x.md": "from server",
+      "d/small.md": "x",
+      "d/edge.md": "a".repeat(1024 * 1024),
+      "d/big.md": "a".repeat(1024 * 1024 + 1),
     });
-    const r = await scan(
-      dir,
-      "sources:\n  /:\n    path: ./all\n  /server/:\n    path: ./srv\n",
-    );
-    expect(paths(r)).toEqual(["/other.md", "/server/x.md"]);
-    expect(r.files.find((f) => f.virtualPath === "/server/x.md")!.diskPath).toBe(path.join(dir, "srv", "x.md"));
-    expect(r.warnings).toContain("mount /server/ overshadows 2 file(s) from mount /");
+    const r = await scan(dir, "name: T\npath: ./d\n");
+    expect(paths(r)).toEqual(["/edge.md", "/small.md"]);
+    expect(r.warnings).toEqual(["skipped /big.md: larger than 1 MB"]);
   });
 
-  it("does not treat /server/ as a prefix of /server2/", async () => {
-    const dir = makeTree({ "all/server2/a.md": "", "srv/b.md": "" });
-    const r = await scan(dir, "sources:\n  /:\n    path: ./all\n  /server/:\n    path: ./srv\n");
-    expect(paths(r)).toEqual(["/server/b.md", "/server2/a.md"]);
+  it("skips names containing # or ? with a warning", async () => {
+    const dir = makeTree({ "d/ok.md": "", "d/c#.md": "" });
+    let hasQuestion = true;
+    try {
+      writeFileSync(path.join(dir, "d", "what?.md"), "");
+    } catch {
+      hasQuestion = false; // e.g. Windows
+    }
+    const r = await scan(dir, "name: T\npath: ./d\n");
+    expect(paths(r)).toEqual(["/ok.md"]);
+    expect(r.warnings).toContain("skipped /c#.md: file name contains '#' or '?'");
+    if (hasQuestion) expect(r.warnings).toContain("skipped /what?.md: file name contains '#' or '?'");
   });
 
-  it("the owning mount's exclude hides files from broader mounts", async () => {
-    const dir = makeTree({ "all/server/legacy/old.md": "", "all/server/new.md": "", "srv/x.md": "" });
-    const r = await scan(
-      dir,
-      `sources:\n  /:\n    path: ./all\n  /server/:\n    path: ./srv\n    exclude: ["**/legacy/**"]\n`,
-    );
-    expect(paths(r)).toEqual(["/server/x.md"]);
+  it("normalizes paths to NFC", async () => {
+    const nfd = "zółw"; // "ó" as o + combining acute
+    const dir = makeTree({ [`d/${nfd}/${nfd}.md`]: "" });
+    const r = await scan(dir, "name: T\npath: ./d\n");
+    expect(paths(r)).toEqual(["/zółw/zółw.md"]);
   });
 
-  it("a file mount beats a directory mount for the same path", async () => {
-    const dir = makeTree({ "all/README.md": "dir", "readme-real.md": "file" });
-    const r = await scan(
-      dir,
-      "sources:\n  /:\n    path: ./all\n  /README.md:\n    path: ./readme-real.md\n",
-    );
-    expect(paths(r)).toEqual(["/README.md"]);
-    expect(r.files[0]!.diskPath).toBe(path.join(dir, "readme-real.md"));
+  it("warns about a missing source directory", async () => {
+    const dir = makeTree();
+    const r = await scan(dir, "name: T\npath: ./nope\n");
+    expect(r.files).toEqual([]);
+    expect(r.warnings).toEqual([`source directory does not exist: ${path.join(dir, "nope")}`]);
   });
 
-  it("a missing mount shadows nothing", async () => {
-    const dir = makeTree({ "all/server/x.md": "" });
-    const r = await scan(dir, "sources:\n  /:\n    path: ./all\n  /server/:\n    path: ./missing\n");
-    expect(paths(r)).toEqual(["/server/x.md"]);
+  it("returns nothing, without warnings, for an empty directory", async () => {
+    const dir = makeTree({ "d/readme.txt": "" });
+    const r = await scan(dir, "name: T\npath: ./d\n");
+    expect(r).toEqual({ files: [], warnings: [] });
+  });
+
+  it("sorts output by code point order", async () => {
+    const dir = makeTree({ "d/b.md": "", "d/a.md": "", "d/c/z.md": "", "d/Z.md": "" });
+    const r = await scan(dir, "name: T\npath: ./d\n");
+    expect(paths(r)).toEqual(["/Z.md", "/a.md", "/b.md", "/c/z.md"]);
   });
 });
 
 describe("case collisions", () => {
-  it("keeps the first name in code point order and warns", async () => {
+  it("keeps the first file name in code point order and warns", async () => {
     const dir = makeTree();
+    if (!caseSensitiveFs(dir)) return;
     mkdirSync(path.join(dir, "d"));
     writeFileSync(path.join(dir, "d", "a.md"), "1");
     writeFileSync(path.join(dir, "d", "A.md"), "2");
-    if (readdirSync(path.join(dir, "d")).length < 2) return; // case-insensitive filesystem
-    const r = await scan(dir, "sources:\n  /d/:\n    path: ./d\n");
-    expect(paths(r)).toEqual(["/d/A.md"]);
-    expect(r.warnings.some((w) => w.includes("/d/a.md") && w.includes("case"))).toBe(true);
+    const r = await scan(dir, "name: T\npath: ./d\n");
+    expect(paths(r)).toEqual(["/A.md"]);
+    expect(r.warnings).toEqual(["skipped /a.md: name differs only by case from /A.md"]);
+  });
+
+  it("detects collisions through directory names", async () => {
+    const dir = makeTree();
+    if (!caseSensitiveFs(dir)) return;
+    mkdirSync(path.join(dir, "d", "Notes"), { recursive: true });
+    mkdirSync(path.join(dir, "d", "notes"));
+    writeFileSync(path.join(dir, "d", "Notes", "x.md"), "");
+    writeFileSync(path.join(dir, "d", "notes", "x.md"), "");
+    writeFileSync(path.join(dir, "d", "notes", "y.md"), "");
+    const r = await scan(dir, "name: T\npath: ./d\n");
+    expect(paths(r)).toEqual(["/Notes/x.md", "/notes/y.md"]);
+    expect(r.warnings).toEqual(["skipped /notes/x.md: name differs only by case from /Notes/x.md"]);
   });
 });

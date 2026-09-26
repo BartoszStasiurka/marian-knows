@@ -1,12 +1,12 @@
 export const MAX_VIRTUAL_PATH_LENGTH = 512;
 
 // eslint-disable-next-line no-control-regex
-const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/;
+export const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/;
 
 /**
- * Validates the syntax shared by mount keys and (later) --path scopes.
+ * Validates virtual path syntax (later: --path scopes and `get`).
  * Returns a list of problems; empty list means valid.
- * The trailing-slash rule (dir vs file) is checked by the caller.
+ * A trailing '/' means a directory; that distinction is up to the caller.
  */
 export function validateVirtualPath(p: string): string[] {
   const errors: string[] = [];

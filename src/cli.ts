@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
-import { ConfigError, findConfig, loadConfig, scanMounts } from "./core/index.js";
+import { ConfigError, findConfig, loadConfig, scanSource } from "./core/index.js";
 
 const USAGE = `Usage: marian-knows <command> [options]
 
 Commands:
-  scan    Resolve sources from the config and print virtual paths (dry run, no index)
+  scan    Scan the source directory and print virtual paths (dry run, no index)
 
 Options:
   --config <file>   Path to marian-knows.yml
@@ -50,7 +50,7 @@ async function main(argv: string[]): Promise<number> {
       return 2;
     }
     const config = loadConfig(configPath);
-    const { files, warnings } = await scanMounts(config.mounts);
+    const { files, warnings } = await scanSource(config);
 
     for (const w of warnings) console.error(`! warning: ${w}`);
 
@@ -63,7 +63,7 @@ async function main(argv: string[]): Promise<number> {
     } else {
       for (const f of files) console.log(values.disk ? `${f.virtualPath}\t${f.diskPath}` : f.virtualPath);
     }
-    console.error(`Mounts: ${config.mounts.length}, files: ${files.length}`);
+    console.error(`Files: ${files.length}`);
     return 0;
   } catch (e) {
     if (e instanceof ConfigError) {

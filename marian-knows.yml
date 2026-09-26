@@ -1,5 +1,2 @@
-sources:
-  /:
-    path: ./docs
-  /README.md:
-    path: ./README.md
+name: MarianKnows
+path: ./docs

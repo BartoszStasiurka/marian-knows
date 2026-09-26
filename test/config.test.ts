@@ -21,47 +21,100 @@ function errorsOf(fn: () => unknown): string[] {
 }
 
 describe("loadConfig", () => {
-  it("parses mounts and applies defaults", () => {
-    const dir = makeTree({ "docs/a.md": "# A", "README.md": "# R" });
-    const cfg = loadConfig(
-      write(
-        dir,
-        `sources:
-  /:
-    path: ./docs
-  /server/:
-    path: ./docs
-    recursive: false
-    exclude: "**/legacy/**"
-  /README.md:
-    path: ./README.md
-`,
-      ),
-    );
-    expect(cfg.mounts.map((m) => m.key)).toEqual(["/", "/server/", "/README.md"]);
-    const [root, server, readme] = cfg.mounts;
-    expect(root).toMatchObject({ kind: "dir", recursive: true, exclude: [], exists: true });
-    expect(root!.diskPath).toBe(path.join(dir, "docs"));
-    expect(server).toMatchObject({ recursive: false, exclude: ["**/legacy/**"] });
-    expect(readme).toMatchObject({ kind: "file", exists: true });
+  it("defaults path to the config directory and exclude to []", () => {
+    const dir = makeTree();
+    const file = write(dir, "name: Test\n");
+    expect(loadConfig(file)).toEqual({
+      configPath: file,
+      configDir: dir,
+      name: "Test",
+      sourceDir: dir,
+      sourceExists: true,
+      exclude: [],
+    });
   });
 
-  it("accepts absolute paths", () => {
+  it("resolves a relative path against the config directory", () => {
+    const dir = makeTree({ "docs/a.md": "" });
+    // Config path given relative to cwd; `path` must still resolve against the config's directory.
+    const cfg = loadConfig(path.relative(process.cwd(), write(dir, "name: T\npath: ./docs\n")));
+    expect(cfg.sourceDir).toBe(path.join(dir, "docs"));
+  });
+
+  it("accepts an absolute path", () => {
     const dir = makeTree({ "x/a.md": "" });
     const abs = path.join(dir, "x");
-    const cfg = loadConfig(write(dir, `sources:\n  /x/:\n    path: ${JSON.stringify(abs)}\n`));
-    expect(cfg.mounts[0]!.diskPath).toBe(abs);
+    const cfg = loadConfig(write(dir, `name: T\npath: ${JSON.stringify(abs)}\n`));
+    expect(cfg.sourceDir).toBe(abs);
   });
 
-  it("treats a missing path as a non-error", () => {
+  it("normalizes exclude to an array", () => {
     const dir = makeTree();
-    const cfg = loadConfig(write(dir, "sources:\n  /nope/:\n    path: ./nope\n"));
-    expect(cfg.mounts[0]!.exists).toBe(false);
+    expect(loadConfig(write(dir, 'name: T\nexclude: "**/draft/**"\n')).exclude).toEqual(["**/draft/**"]);
+    expect(loadConfig(write(dir, 'name: T\nexclude: ["a/**", "b/**"]\n')).exclude).toEqual(["a/**", "b/**"]);
+  });
+
+  it("treats a missing source directory as a non-error", () => {
+    const dir = makeTree();
+    const cfg = loadConfig(write(dir, "name: T\npath: ./nope\n"));
+    expect(cfg.sourceExists).toBe(false);
+    expect(cfg.sourceDir).toBe(path.join(dir, "nope"));
+  });
+
+  it("rejects a path that is not a directory", () => {
+    const dir = makeTree({ "file.md": "" });
+    expect(errorsOf(() => loadConfig(write(dir, "name: T\npath: ./file.md\n")))[0]).toMatch(/not a directory/);
+  });
+
+  it("trims the name", () => {
+    const dir = makeTree();
+    expect(loadConfig(write(dir, 'name: "  Baza wiedzy  "\n')).name).toBe("Baza wiedzy");
+  });
+
+  it.each([
+    ["empty", 'name: ""\n', "must not be empty"],
+    ["whitespace only", 'name: "   "\n', "must not be empty"],
+    ["too long", `name: ${"x".repeat(129)}\n`, "longer than 128"],
+    ["control character", 'name: "a\\tb"\n', "control characters"],
+  ])("rejects a name that is %s", (_label, yaml, fragment) => {
+    const dir = makeTree();
+    const errors = errorsOf(() => loadConfig(write(dir, yaml)));
+    expect(errors.join("|")).toContain(fragment);
+    expect(errors[0]).toMatch(/^name:/);
+  });
+
+  it("accepts a name of exactly 128 characters after trimming", () => {
+    const dir = makeTree();
+    expect(loadConfig(write(dir, `name: "  ${"x".repeat(128)}  "\n`)).name).toHaveLength(128);
+  });
+
+  it("requires name to be a string", () => {
+    const dir = makeTree();
+    expect(errorsOf(() => loadConfig(write(dir, "path: .\n")))[0]).toMatch(/^name:/);
+    expect(errorsOf(() => loadConfig(write(dir, "name: [a]\n")))[0]).toMatch(/^name:/);
+  });
+
+  it("rejects the old sources field with a specific message", () => {
+    const dir = makeTree();
+    const errors = errorsOf(() => loadConfig(write(dir, "name: T\nsources:\n  /:\n    path: .\n")));
+    expect(errors).toEqual(["sources: no longer supported; use name, path and exclude"]);
+  });
+
+  it("rejects unknown fields and wrong types, collecting all errors", () => {
+    const dir = makeTree();
+    const errors = errorsOf(() => loadConfig(write(dir, "name: T\nrecursive: false\nexclude: 5\n")));
+    expect(errors.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("collects name and path errors at once", () => {
+    const dir = makeTree({ "f.md": "" });
+    const errors = errorsOf(() => loadConfig(write(dir, 'name: ""\npath: ./f.md\n')));
+    expect(errors).toHaveLength(2);
   });
 
   it("reports invalid YAML", () => {
     const dir = makeTree();
-    expect(errorsOf(() => loadConfig(write(dir, "sources: [unclosed")))[0]).toMatch(/invalid YAML/);
+    expect(errorsOf(() => loadConfig(write(dir, "name: [unclosed")))[0]).toMatch(/invalid YAML/);
   });
 
   it("reports a missing config file", () => {
@@ -69,73 +122,16 @@ describe("loadConfig", () => {
     expect(errorsOf(() => loadConfig(path.join(dir, "missing.yml")))[0]).toMatch(/cannot read/);
   });
 
-  it("rejects unknown fields and wrong types", () => {
+  it("reports an empty config file", () => {
     const dir = makeTree();
-    const errors = errorsOf(() =>
-      loadConfig(write(dir, "sources:\n  /a/:\n    path: ./a\n    recursve: true\n    exclude: 5\n")),
-    );
-    expect(errors.length).toBeGreaterThanOrEqual(2);
-  });
-
-  it("rejects empty sources", () => {
-    const dir = makeTree();
-    expect(errorsOf(() => loadConfig(write(dir, "sources: {}\n")))[0]).toMatch(/at least one/);
-  });
-
-  it("collects all key errors at once", () => {
-    const dir = makeTree({ "d/a.md": "" });
-    const errors = errorsOf(() =>
-      loadConfig(
-        write(
-          dir,
-          `sources:
-  /a//b/:
-    path: ./d
-  /Notes/:
-    path: ./d
-  /notes/:
-    path: ./d
-  /../x/:
-    path: ./d
-`,
-        ),
-      ),
-    );
-    expect(errors.some((e) => e.includes("empty segments"))).toBe(true);
-    expect(errors.some((e) => e.includes("ignoring case"))).toBe(true);
-    expect(errors.some((e) => e.includes("forbidden segment"))).toBe(true);
-  });
-
-  it("requires the trailing slash to match the path type", () => {
-    const dir = makeTree({ "d/a.md": "", "f.md": "" });
-    const errors = errorsOf(() =>
-      loadConfig(
-        write(
-          dir,
-          `sources:
-  /dir:
-    path: ./d
-  /file/:
-    path: ./f.md
-`,
-        ),
-      ),
-    );
-    expect(errors.some((e) => e.includes('"/dir"') && e.includes("not a file"))).toBe(true);
-    expect(errors.some((e) => e.includes('"/file/"'))).toBe(true);
-  });
-
-  it("requires file sources to be .md", () => {
-    const dir = makeTree({ "notes.txt": "" });
-    const errors = errorsOf(() => loadConfig(write(dir, "sources:\n  /notes.txt:\n    path: ./notes.txt\n")));
-    expect(errors.some((e) => e.includes(".md"))).toBe(true);
+    expect(errorsOf(() => loadConfig(write(dir, ""))).length).toBeGreaterThan(0);
   });
 });
 
 describe("findConfig", () => {
   it("prefers --config over env over discovery", () => {
     const dir = makeTree();
-    write(dir, "sources: {}");
+    write(dir, "name: T\n");
     expect(findConfig({ explicit: "a.yml", env: { MARIAN_KNOWS_CONFIG: "b.yml" }, cwd: dir })).toBe(
       path.join(dir, "a.yml"),
     );
@@ -144,7 +140,7 @@ describe("findConfig", () => {
 
   it("walks up from a nested directory", () => {
     const dir = makeTree();
-    const file = write(dir, "sources: {}");
+    const file = write(dir, "name: T\n");
     const nested = path.join(dir, "a", "b");
     mkdirSync(nested, { recursive: true });
     expect(findConfig({ env: {}, cwd: nested })).toBe(file);
