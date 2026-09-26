@@ -22,4 +22,4 @@ Node.js 20+, ESM, TypeScript strict. Full spec: `docs/requirements.md` (Polish, 
 
 ## Before every commit
 
-`npm run typecheck && npm test` must pass. Small commits, one concern each, imperative mood ("Add mount overlap resolution").
+`npm run typecheck && npm test` must pass. Small commits, one concern each, imperative mood ("Add section anchors").

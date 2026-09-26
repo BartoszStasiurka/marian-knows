@@ -13,46 +13,43 @@ Zastosowanie docelowe: karmienie asystenta AI, który pomaga klientowi. Ta sama 
 
 ## 3. Konfiguracja: `marian-knows.yml`
 
-Źródła to mapa punktów montowania: klucz = wirtualna ścieżka w indeksie, `path` = lokalizacja na dysku.
+Konfiguracja opisuje jeden projekt i jeden katalog źródłowy.
 
 ```yaml
-sources:
-  /:
-    path: .
-    recursive: true
-  /server/:
-    path: /full/path/to/server-dir
-    recursive: false
-    exclude: ["**/legacy/**"]
-  /README.md:
-    path: ./README.md
+name: Baza wiedzy klienta
+path: ./docs
+exclude:
+  - "**/draft/**"
 ```
 
-| Pole        | Opis                                                                |
-| ----------- | ------------------------------------------------------------------- |
-| klucz       | wirtualna ścieżka (zasady niżej)                                    |
-| `path`      | plik lub katalog; względna do katalogu z `marian-knows.yml` albo absolutna |
-| `recursive` | dla katalogów, domyślnie `true`; dla plików ignorowane              |
-| `exclude`   | string lub lista globów względnych do `path`; opcjonalne            |
+| Pole      | Opis                                                                                     |
+| --------- | ---------------------------------------------------------------------------------------- |
+| `name`    | wymagany identyfikator projektu                                                           |
+| `path`    | katalog źródłowy; względny do katalogu z `marian-knows.yml` albo absolutny; opcjonalny     |
+| `exclude` | string lub lista globów względnych do `path`; opcjonalne                                  |
 
-**Klucz mounta**
-- Ścieżka absolutna z separatorem `/`, w Unicode NFC.
-- Kończy się `/` wtedy i tylko wtedy, gdy `path` to katalog; niezgodność to błąd konfiguracji.
-- Zabronione: puste segmenty (`//`), segmenty `.` i `..`, `\`, znaki sterujące, białe znaki na brzegach segmentu. Maks. 512 znaków.
-- Wielkość liter jest rozróżniana, wielkie litery dozwolone, ale unikalność kluczy sprawdzana bez jej uwzględniania (`/Notes/` i `/notes/` to błąd).
-- Walidacja zbiera wszystkie błędy naraz, kod wyjścia 2.
+**`name`**
+- Po usunięciu białych znaków z brzegów: od 1 do 128 znaków, bez znaków sterujących.
+- Na razie tylko metadane: nie wpływa na nazwę ani lokalizację bazy danych.
 
-**Tryby:** plik (musi mieć `.md`); katalog płaski (`recursive: false`); katalog rekurencyjny.
+**`path`**
+- Brak pola oznacza katalog pliku `marian-knows.yml`. Skanowanie jest zawsze rekurencyjne.
+- Istniejące `path` musi wskazywać katalog; plik to błąd konfiguracji.
+- Nieistniejący katalog nie jest błędem: `scan` wypisuje ostrzeżenie i nie znajduje plików.
+- Błąd dostępu do katalogu (np. brak uprawnień) jest błędem konfiguracji.
 
-**Zasady**
-- Indeksowane są tylko `.md`. Zawsze pomijane: ukryte pliki i katalogi (od kropki), `node_modules`, pliki większe niż 1 MB (ostrzeżenie).
-- W indeksie są wyłącznie **ścieżki wirtualne** (klucz + ścieżka względna, `/`, NFC, np. `/server/api/readme.md`); ścieżki dyskowe żyją tylko w YAML-u, więc baza jest przenośna.
-- Nazwy plików ze znakami `#` i `?` są pomijane z ostrzeżeniem.
-- Kolizja wielkości liter w jednym katalogu (`a.md`, `A.md`): do indeksu trafia pierwszy alfabetycznie, reszta jest pomijana z ostrzeżeniem.
-- Nakładanie mountów: wygrywa najdłuższy prefiks (granica katalogu dzięki końcowemu `/`, więc `/server/` nie obejmuje `/server2/`); mount plikowy wygrywa z katalogowym dla tej samej ścieżki. Liczba przesłoniętych plików jest raportowana ostrzeżeniem.
-- Nieistniejący `path` lub mount bez dopasowań to ostrzeżenie, nie błąd.
+**Walidacja:** nieznane pola są błędem; stare pole `sources` jest odrzucane z osobnym komunikatem. Walidacja zbiera wszystkie błędy naraz, kod wyjścia 2.
+
+**Zasady skanowania**
+- Indeksowane są tylko `.md`. Zawsze pomijane, niezależnie od `exclude`: ukryte pliki i katalogi (od kropki), `node_modules`.
+- Pliki większe niż 1 MB oraz nazwy zawierające `#` lub `?` są pomijane z ostrzeżeniem.
+- Ścieżka wirtualna pliku to `/` oraz jego ścieżka względna wobec `path`, z separatorami `/` i normalizacją Unicode NFC. Przykład: `path: ./docs` i plik `docs/api/readme.md` dają `/api/readme.md`.
+- W indeksie są wyłącznie **ścieżki wirtualne**; ścieżki dyskowe żyją tylko w YAML-u i w wyjściu diagnostycznym (`scan --disk`), więc baza jest przenośna.
+- Kolizja ścieżek różniących się wyłącznie wielkością liter (także w nazwach katalogów, np. `/Notes/x.md` i `/notes/x.md`): wygrywa pierwsza w porządku punktów kodowych, pozostałe są pomijane z ostrzeżeniem.
+
+**Pozostałe**
 - Baza leży obok pliku konfiguracyjnego (`marian-knows.db`, `-wal`, `-shm`), lokalizacji nie da się zmienić. Jedno `marian-knows.yml` = jedna baza; treści publiczne i wewnętrzne rozdziela się w v1 osobnymi `marian-knows.yml`.
-- Wybór konfiguracji: `--config <plik>`, potem `MARIAN_KNOWS_CONFIG`, potem `marian-knows.yml` szukany w górę od bieżącego katalogu.
+- Wybór konfiguracji: `--config <plik>`, potem `MARIAN_KNOWS_CONFIG`, potem `marian-knows.yml` szukany w górę od bieżącego katalogu. Wyjątek: `init` używa tylko `--config` albo `./marian-knows.yml`.
 
 ## 4. Indeks
 
@@ -79,14 +76,14 @@ CREATE VIRTUAL TABLE sections_fts USING fts5(         -- rowid = sections.id
 ```
 
 **Synchronizacja inkrementalna** (diff zbioru plików, w jednej transakcji):
-1. Skan mountów daje zbiór plików po rozstrzygnięciu nakładania i kolizji.
+1. Skan katalogu źródłowego daje zbiór plików po rozstrzygnięciu kolizji wielkości liter.
 2. Porównanie z indeksem: nowe, usunięte, potencjalnie zmienione (inny `mtime` lub `size`).
 3. Dla potencjalnie zmienionych liczony jest hash: taki sam = tylko aktualizacja `mtime`, inny = przeindeksowanie wszystkich sekcji pliku.
-4. Pliki usunięte, wykluczone lub przesłonięte znikają, bo diff opiera się na zbiorze ścieżek.
+4. Pliki usunięte lub wykluczone znikają, bo diff opiera się na zbiorze ścieżek.
 
 **Pełna przebudowa:** przy niezgodności `schema_version` (schemat, tokenizer, parser sekcji) albo ręcznie `marian-knows index --full`.
 
-**Odporność i współbieżność:** WAL (`search` działa w trakcie `index`), blokada przed równoległymi `index`, nieczytelny plik to ostrzeżenie i kontynuacja. `stats` pokazuje wiek indeksu.
+**Odporność i współbieżność:** WAL (`search` działa w trakcie `index`), blokada przed równoległymi `index`, nieczytelny plik to ostrzeżenie i kontynuacja. `status` pokazuje wiek indeksu.
 
 ## 5. Wyszukiwanie
 
@@ -102,25 +99,34 @@ CREATE VIRTUAL TABLE sections_fts USING fts5(         -- rowid = sections.id
 - `--path` można powtarzać (OR); `--exclude-path` wyklucza poddrzewa lub pliki.
 - Filtr działa przed rankingiem i limitem (`-n` dotyczy wyników z zakresu), łączy się z innymi filtrami (`--tag`) przez AND.
 - Zakres jest wyłącznie parametrem zapytania (nie ma go w konfiguracji, nie ma `--depth`) i dotyczy ścieżek wirtualnych.
-- Składnia jak klucz mounta; niepoprawna ścieżka to błąd (kod 2). Poprawna, ale bez plików w indeksie: brak wyników (kod 1 w `search`) i ostrzeżenie na stderr.
+- Składnia ścieżki wirtualnej: zaczyna się od `/`, separator `/`, Unicode NFC; zabronione puste segmenty (`//`), segmenty `.` i `..`, `\`, znaki sterujące, białe znaki na brzegach segmentu; maks. 512 znaków. Niepoprawna ścieżka to błąd (kod 2). Poprawna, ale bez plików w indeksie: brak wyników (kod 1 w `search`) i ostrzeżenie na stderr.
 
 ## 6. Interfejs CLI
 
 ```
-marian-knows init                     # tworzy marian-knows.yml, dopisuje marian-knows.db* do .gitignore
+marian-knows init <project_name>      # tworzy minimalny marian-knows.yml z polem name
+marian-knows scan [--json] [--disk]   # pliki z katalogu źródłowego (bez indeksu)
+marian-knows parse <file> [--json]    # parsowanie pliku wskazanego ścieżką dyskową
 marian-knows index [--full]           # (re)indeksowanie
 marian-knows search <query> [opcje]   # pliki wg rankingu
 marian-knows list [opcje]             # pliki z indeksu, posortowane po ścieżce
-marian-knows get <path>               # zawartość pliku
-marian-knows stats                    # liczba plików i sekcji, rozmiar, czas i wiek indeksu
+marian-knows get <path>               # zawartość pliku (ścieżka wirtualna)
+marian-knows status [--json]          # stan projektu: konfiguracja, liczba plików i sekcji, rozmiar, czas i wiek indeksu
+marian-knows destroy                  # usuwa projekt i wszystkie jego dane
+marian-knows help                     # pomoc (także --help)
 ```
 
-Opcja globalna: `--config <plik>`.
+Opcja globalna: `--config <plik>` (dla `init`: plik, który ma zostać utworzony).
 
 | Komenda  | Opcje                                                                                                          |
 | -------- | -------------------------------------------------------------------------------------------------------------- |
 | `search` | `-n <limit>`, `--json`, `--snippets`, `--tag <tag>`, `--exact`, `--path <prefiks>`, `--exclude-path <prefiks>` |
 | `list`   | `--json`, `--tag <tag>`, `--path <prefiks>`, `--exclude-path <prefiks>`                                        |
+| `scan`   | `--json`, `--disk` (dołącza ścieżki dyskowe, wyłącznie diagnostycznie)                                         |
+
+**`init <project_name>`:** nazwa podlega tym samym zasadom co `name`. Domyślny cel to `./marian-knows.yml`; istniejący plik nigdy nie jest nadpisywany (kod 2). Polecenie nie modyfikuje `.gitignore` i nie tworzy plików bazy danych.
+
+**Komendy jeszcze niezaimplementowane:** `parse`, `index`, `search`, `list`, `get`, `status` i `destroy` są rozpoznawane przez CLI, przyjmują dowolne opcje, nie mają efektów ubocznych, zwracają kod 0 i wypisują `TODO: implementacja` na stderr. Także z `--json` nie udają jeszcze docelowego kontraktu JSON.
 
 Domyślne wyjście: jeden plik na linię, ścieżka wirtualna.
 
@@ -136,9 +142,9 @@ $ marian-knows search backup --json -n 1
 [{"path":"/server/deploy.md","title":"Deploy","tags":["ops"],"score":-8.41,"anchor":"harmonogram","snippet":"…[backup] bazy…"}]
 
 $ marian-knows index
-Mounty: 3, plików .md: 42
+Plików .md: 42
 + 42 nowych, ~ 0 zmienionych, - 0 usuniętych (0.4 s)
-! ostrzeżenie: mount /server/ przesłania 3 pliki z mountu /
+! ostrzeżenie: pominięto /notes/x.md: nazwa różni się tylko wielkością liter od /Notes/x.md
 ```
 
 - **Kontrakt `--json`** (stabilny, korzysta z niego m.in. przyszły MCP): goła tablica obiektów, po jednym na plik, w kolejności rankingu (`list`: po ścieżce). Bez koperty i `schemaVersion` w v1.
@@ -146,13 +152,13 @@ Mounty: 3, plików .md: 42
 - `score` to `bm25` (niższa wartość = lepiej), porównywalny tylko w obrębie jednego zapytania.
 - Zmiany dodające pola są zgodne wstecz; usunięcie pola lub zmiana jego znaczenia wymaga podniesienia wersji głównej `marian-knows`.
 - W trybie `--json` stdout zawiera wyłącznie JSON, ostrzeżenia i błędy idą na stderr; brak wyników to `[]` i kod 1.
-- `get` zamienia ścieżkę wirtualną na dyskową przez mounty i odrzuca wyjście poza katalog mountu.
+- `get` zamienia ścieżkę wirtualną na dyskową względem `path` i może odczytać wyłącznie plik wewnątrz skonfigurowanego katalogu źródłowego.
 
 | Kod | Znaczenie                                                                                |
 | --- | ---------------------------------------------------------------------------------------- |
 | 0   | OK                                                                                       |
 | 1   | brak wyników w `search` (jak `grep`)                                                     |
-| 2   | błąd: brak konfiguracji, zły YAML, błędny klucz mounta lub ścieżka zakresu, brak indeksu |
+| 2   | błąd: brak konfiguracji, zły YAML, błędna konfiguracja lub ścieżka zakresu, brak indeksu |
 
 Przy braku indeksu: `Brak indeksu. Uruchom: marian-knows index`.
 
@@ -162,7 +168,7 @@ Przy braku indeksu: `Brak indeksu. Uruchom: marian-knows index`.
 marian-knows/
 ├─ package.json     # bin: { "marian-knows": "dist/cli.js" }, exports: { "./core": ... }
 └─ src/
-   ├─ core/         # config, mounty, indexer, search, list
+   ├─ core/         # config, scan, init, indexer, search, list
    └─ cli.ts        # argumenty i formatowanie wyjścia
 ```
 
