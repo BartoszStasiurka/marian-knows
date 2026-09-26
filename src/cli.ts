@@ -7,12 +7,32 @@ const USAGE = `Usage: marian-knows <command> [options]
 Commands:
   init <project_name>   Create a minimal marian-knows.yml (never overwrites)
   scan                  Scan the source directory and print virtual paths (dry run, no index)
+  help                  Show this help
+
+Not implemented yet:
+  parse <file>          Parse a Markdown file given by disk path
+  index [--full]        Build or update the index
+  search <query>        Search the index
+  list                  List indexed files
+  get <path>            Print a file by virtual path
+  status                Show project, config and index state
+  destroy               Remove the project and all its data
 
 Options:
   --config <file>   Path to marian-knows.yml (for init: the file to create)
   --json            JSON output (scan)
   --disk            Include disk paths (scan; diagnostic only)
   -h, --help        Show this help`;
+
+const OPTIONS = {
+  config: { type: "string" },
+  json: { type: "boolean" },
+  disk: { type: "boolean" },
+  help: { type: "boolean", short: "h" },
+} as const;
+
+/** Recognised but not implemented: no side effects, exit 0. */
+const STUBS = new Set(["parse", "index", "search", "list", "get", "status", "destroy"]);
 
 async function scan(values: { config?: string; json?: boolean; disk?: boolean }): Promise<number> {
   const configPath = findConfig({ explicit: values.config });
@@ -47,17 +67,19 @@ function init(name: string | undefined, values: { config?: string }): number {
 }
 
 async function main(argv: string[]): Promise<number> {
+  // Stubs accept any options (e.g. `index --full`), so detect them before strict parsing.
+  const [loose] = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true, strict: false }).positionals;
+  if (loose !== undefined && STUBS.has(loose)) {
+    console.error("TODO: implementacja");
+    return 0;
+  }
+
   let parsed;
   try {
     parsed = parseArgs({
       args: argv,
+      options: OPTIONS,
       allowPositionals: true,
-      options: {
-        config: { type: "string" },
-        json: { type: "boolean" },
-        disk: { type: "boolean" },
-        help: { type: "boolean", short: "h" },
-      },
     });
   } catch (e) {
     console.error((e as Error).message);
@@ -67,7 +89,7 @@ async function main(argv: string[]): Promise<number> {
   const { values, positionals } = parsed;
   const [command, ...args] = positionals;
 
-  if (values.help || !command) {
+  if (values.help || command === "help" || !command) {
     console.log(USAGE);
     return command || values.help ? 0 : 2;
   }
