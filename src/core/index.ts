@@ -8,6 +8,14 @@ export {
 } from "./config.js";
 export { ConfigError } from "./errors.js";
 export { initConfig } from "./init.js";
+export {
+  MAX_SECTION_CHARS,
+  MIN_SECTION_CHARS,
+  decodeMarkdown,
+  parseFile,
+  parseMarkdown,
+  slugify,
+} from "./parse.js";
 export { MAX_FILE_BYTES, scanSource } from "./scan.js";
-export type { LoadedConfig, ScanResult, ScannedFile } from "./types.js";
+export type { LoadedConfig, ParsedDoc, ScanResult, ScannedFile, Section } from "./types.js";
 export { validateVirtualPath } from "./virtual-path.js";

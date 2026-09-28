@@ -19,3 +19,23 @@ export interface ScanResult {
   files: ScannedFile[];
   warnings: string[];
 }
+
+export interface Section {
+  /** Position in the file, from 0. */
+  ord: number;
+  /** 2 or 3; null for text before the first heading. */
+  level: 2 | 3 | null;
+  heading: string | null;
+  /** Slug of the heading, unique per file; null for text before the first heading. */
+  anchor: string | null;
+  body: string;
+}
+
+export interface ParsedDoc {
+  title: string;
+  tags: string[];
+  /** Whole frontmatter; null when missing or broken. */
+  frontmatter: Record<string, unknown> | null;
+  sections: Section[];
+  warnings: string[];
+}

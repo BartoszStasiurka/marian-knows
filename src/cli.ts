@@ -1,16 +1,25 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
-import { CONFIG_FILENAME, ConfigError, findConfig, initConfig, loadConfig, scanSource } from "./core/index.js";
+import {
+  CONFIG_FILENAME,
+  ConfigError,
+  findConfig,
+  initConfig,
+  loadConfig,
+  parseFile,
+  scanSource,
+  type ParsedDoc,
+} from "./core/index.js";
 
 const USAGE = `Usage: marian-knows <command> [options]
 
 Commands:
   init <project_name>   Create a minimal marian-knows.yml (never overwrites)
   scan                  Scan the source directory and print virtual paths (dry run, no index)
+  parse <file>          Parse a Markdown file given by disk path (diagnostic, no config needed)
   help                  Show this help
 
 Not implemented yet:
-  parse <file>          Parse a Markdown file given by disk path
   index [--full]        Build or update the index
   search <query>        Search the index
   list                  List indexed files
@@ -20,7 +29,7 @@ Not implemented yet:
 
 Options:
   --config <file>   Path to marian-knows.yml (for init: the file to create)
-  --json            JSON output (scan)
+  --json            JSON output (scan, parse)
   --disk            Include disk paths (scan; diagnostic only)
   -h, --help        Show this help`;
 
@@ -32,7 +41,7 @@ const OPTIONS = {
 } as const;
 
 /** Recognised but not implemented: no side effects, exit 0. */
-const STUBS = new Set(["parse", "index", "search", "list", "get", "status", "destroy"]);
+const STUBS = new Set(["index", "search", "list", "get", "status", "destroy"]);
 
 async function scan(values: { config?: string; json?: boolean; disk?: boolean }): Promise<number> {
   const configPath = findConfig({ explicit: values.config });
@@ -53,6 +62,47 @@ async function scan(values: { config?: string; json?: boolean; disk?: boolean })
     for (const f of files) console.log(values.disk ? `${f.virtualPath}\t${f.diskPath}` : f.virtualPath);
   }
   console.error(`Files: ${files.length}`);
+  return 0;
+}
+
+const PREVIEW_CHARS = 80;
+
+function preview(body: string): string {
+  const flat = body.replace(/\s+/g, " ").trim();
+  return flat.length > PREVIEW_CHARS ? `${flat.slice(0, PREVIEW_CHARS)}…` : flat;
+}
+
+function printParsed(doc: ParsedDoc): void {
+  console.log(`Title: ${doc.title}`);
+  console.log(`Tags: ${doc.tags.length ? doc.tags.join(", ") : "-"}`);
+  console.log(`Frontmatter: ${doc.frontmatter ? JSON.stringify(doc.frontmatter) : "-"}`);
+  console.log(`Sections: ${doc.sections.length}`);
+  for (const s of doc.sections) {
+    const head = s.level === null ? "(before first heading)" : `${"#".repeat(s.level)} ${s.heading}  #${s.anchor}`;
+    console.log(`\n[${s.ord}] ${head}  (${s.body.length} chars)`);
+    if (s.body) console.log(`  ${preview(s.body)}`);
+  }
+}
+
+function parse(file: string | undefined, values: { json?: boolean }): number {
+  if (file === undefined) {
+    console.error("Missing <file>. Usage: marian-knows parse <file> [--json]");
+    return 2;
+  }
+  let doc: ParsedDoc;
+  try {
+    doc = parseFile(file);
+  } catch (e) {
+    console.error(`error: cannot read ${file}: ${(e as NodeJS.ErrnoException).code ?? (e as Error).message}`);
+    return 2;
+  }
+  for (const w of doc.warnings) console.error(`! warning: ${w}`);
+  if (values.json) {
+    const { warnings: _, ...rest } = doc;
+    console.log(JSON.stringify(rest));
+  } else {
+    printParsed(doc);
+  }
   return 0;
 }
 
@@ -100,6 +150,8 @@ async function main(argv: string[]): Promise<number> {
         return await scan(values);
       case "init":
         return init(args[0], values);
+      case "parse":
+        return parse(args[0], values);
       default:
         console.error(`Unknown command: ${command}\n\n${USAGE}`);
         return 2;

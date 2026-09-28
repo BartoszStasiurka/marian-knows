@@ -18,23 +18,23 @@ Behavior details live in `docs/requirements.md`.
 - [x] `help` / `--help`
 - [x] Stubs for later commands (`TODO: implementacja` on stderr, exit 0)
 
-## 2. Parser
+## 2. Parser (done)
 
 Pure functions, no DB.
 
-- [ ] Read file: UTF-8, strip BOM, normalize CRLF and NFC
-- [ ] Frontmatter extraction (`yaml`), whole frontmatter kept as JSON
-- [ ] Broken frontmatter: no metadata, warning, body still parsed
-- [ ] Tags from `tags` (string or list)
-- [ ] Title: `title` from frontmatter, then first H1, then file name
-- [ ] Detect fenced code blocks so headings inside them are ignored
-- [ ] Split into sections on H2/H3; H4+ stays in the parent section
-- [ ] Section 0 for text before the first heading; no headings = one section
-- [ ] Anchors: slug from heading, unique per file (`backup`, `backup-1`)
-- [ ] Merge sections shorter than 200 chars into the previous one
-- [ ] Split sections longer than 2000 chars on paragraph boundaries
-- [ ] `parse <file>` command: human-readable output
-- [ ] `parse <file> --json`
+- [x] Read file: UTF-8, strip BOM, normalize CRLF and NFC
+- [x] Frontmatter extraction (`yaml`), whole frontmatter kept as JSON
+- [x] Broken frontmatter: no metadata, warning, body still parsed
+- [x] Tags from `tags` (string or list)
+- [x] Title: `title` from frontmatter, then first H1, then file name
+- [x] Detect fenced code blocks so headings inside them are ignored
+- [x] Split into sections on H2/H3; H4+ stays in the parent section
+- [x] Section 0 for text before the first heading; no headings = one section
+- [x] Anchors: slug from heading, unique per file (`backup`, `backup-1`)
+- [x] Merge sections shorter than 200 chars into the previous one
+- [x] Split sections longer than 2000 chars on paragraph boundaries
+- [x] `parse <file>` command: human-readable output
+- [x] `parse <file> --json`
 
 ## 3. Index
 

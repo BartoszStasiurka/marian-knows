@@ -55,6 +55,15 @@ exclude:
 
 **Jednostka: sekcja.** Plik jest dzielony po nagłówkach H2 i H3 (H1 to tytuł dokumentu; H4+ zostają w treści sekcji nadrzędnej). Tekst przed pierwszym nagłówkiem to sekcja 0; plik bez nagłówków to jedna sekcja. Nagłówki w blokach kodu są ignorowane. Zbyt krótkie sekcje są łączone z poprzednimi, zbyt długie dzielone po akapitach. Każda sekcja ma kotwicę (slug, unikalny w pliku: `backup`, `backup-1`) i dziedziczy tytuł oraz tagi pliku.
 
+**Szczegóły parsera:**
+- Nagłówki: tylko ATX (`## Tytuł`), do 3 spacji wcięcia, spacja po `#` wymagana; nagłówki setext (`===`, `---`) nie są rozpoznawane. Bloki kodu: ```` ``` ```` i `~~~`, zamknięcie tym samym znakiem i co najmniej tą samą długością; niezamknięty blok trwa do końca pliku.
+- Pierwszy H1 przed pierwszym H2/H3 nie trafia do treści sekcji 0 (jest tytułem). Pusta sekcja 0 jest pomijana.
+- Kotwica w stylu GitHuba: małe litery, interpunkcja usunięta, polskie litery zachowane, każdy biały znak to `-`; pusty slug to `section`. Kotwice liczone są przed łączeniem, więc scalenie sekcji nie przesuwa pozostałych.
+- Długość sekcji to długość treści bez nagłówka. Scalona sekcja trafia do poprzedniej razem z linią nagłówka. Pierwsza sekcja pliku nie ma z czym się połączyć i zostaje, nawet krótka.
+- Części podzielonej sekcji mają ten sam nagłówek i kotwicę (kotwica to cel linku). Blok kodu i pojedynczy akapit dłuższy niż limit nie są cięte.
+- `tags` jako string jest dzielony po przecinkach; elementy listy będące liczbami są zamieniane na tekst, inne pomijane; tagi są przycinane i deduplikowane. `title` i `tags` złego typu są ignorowane z ostrzeżeniem.
+- Frontmatter musi zaczynać się w pierwszej linii (`---`) i kończyć `---` albo `...`. Niezamknięty frontmatter jest traktowany jako treść, z ostrzeżeniem.
+
 **Metadane:** tytuł z `title` we frontmatterze, potem pierwszy H1, potem nazwa pliku; tagi z `tags`; cały frontmatter zapisany też jako JSON. Zepsuty frontmatter: plik jest indeksowany bez metadanych, z ostrzeżeniem. Kodowanie UTF-8, obsługa BOM, normalizacja CRLF i NFC.
 
 ```sql
@@ -126,7 +135,9 @@ Opcja globalna: `--config <plik>` (dla `init`: plik, który ma zostać utworzony
 
 **`init <project_name>`:** nazwa podlega tym samym zasadom co `name`. Domyślny cel to `./marian-knows.yml`; istniejący plik nigdy nie jest nadpisywany (kod 2). Polecenie nie modyfikuje `.gitignore` i nie tworzy plików bazy danych.
 
-**Komendy jeszcze niezaimplementowane:** `parse`, `index`, `search`, `list`, `get`, `status` i `destroy` są rozpoznawane przez CLI, przyjmują dowolne opcje, nie mają efektów ubocznych, zwracają kod 0 i wypisują `TODO: implementacja` na stderr. Także z `--json` nie udają jeszcze docelowego kontraktu JSON.
+**`parse <file>`:** diagnostyka parsera, nie wymaga konfiguracji. Domyślnie wypisuje tytuł, tagi, frontmatter i listę sekcji z podglądem treści; `--json` wypisuje jeden obiekt `{title, tags, frontmatter, sections}`. Ostrzeżenia idą na stderr; nieczytelny plik to kod 2.
+
+**Komendy jeszcze niezaimplementowane:** `index`, `search`, `list`, `get`, `status` i `destroy` są rozpoznawane przez CLI, przyjmują dowolne opcje, nie mają efektów ubocznych, zwracają kod 0 i wypisują `TODO: implementacja` na stderr. Także z `--json` nie udają jeszcze docelowego kontraktu JSON.
 
 Domyślne wyjście: jeden plik na linię, ścieżka wirtualna.
 

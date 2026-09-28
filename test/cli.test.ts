@@ -146,10 +146,45 @@ describe.concurrent("help and unknown commands", () => {
   });
 });
 
+describe.concurrent("parse", () => {
+  const md = "---\ntitle: Deploy\ntags: [ops]\n---\nIntro.\n\n## Backup\n" + "b".repeat(250) + "\n";
+
+  it("prints metadata and sections without needing a config", async () => {
+    const dir = makeTree({ "notes/deploy.md": md });
+    const r = await runCli(["parse", "notes/deploy.md"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stderr).toBe("");
+    expect(r.stdout).toContain("Title: Deploy\nTags: ops\n");
+    expect(r.stdout).toContain('Frontmatter: {"title":"Deploy","tags":["ops"]}');
+    expect(r.stdout).toContain("Sections: 2");
+    expect(r.stdout).toContain("[0] (before first heading)  (6 chars)\n  Intro.");
+    expect(r.stdout).toContain(`[1] ## Backup  #backup  (250 chars)\n  ${"b".repeat(80)}…`);
+  });
+
+  it("--json prints one object, warnings on stderr", async () => {
+    const dir = makeTree({ "a.md": "---\n: [\n---\n# A\ntext" });
+    const r = await runCli(["parse", "a.md", "--json"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout)).toEqual({
+      title: "A",
+      tags: [],
+      frontmatter: null,
+      sections: [{ ord: 0, level: null, heading: null, anchor: null, body: "text" }],
+    });
+    expect(r.stderr).toMatch(/^! warning: broken frontmatter/);
+  });
+
+  it("fails with exit code 2 on a missing file or argument", async () => {
+    const dir = makeTree();
+    const missing = await runCli(["parse", "nope.md"], { cwd: dir });
+    expect(missing.code).toBe(2);
+    expect(missing.stderr).toContain("error: cannot read nope.md: ENOENT");
+    expect((await runCli(["parse"], { cwd: dir })).code).toBe(2);
+  });
+});
+
 describe.concurrent("stub commands", () => {
   it.each([
-    ["parse", "some/file.md"],
-    ["parse", "some/file.md", "--json"],
     ["index"],
     ["index", "--full"],
     ["search", "backup", "-n", "5", "--json"],
