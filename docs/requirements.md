@@ -48,7 +48,7 @@ exclude:
 - Kolizja ścieżek różniących się wyłącznie wielkością liter (także w nazwach katalogów, np. `/Notes/x.md` i `/notes/x.md`): wygrywa pierwsza w porządku punktów kodowych, pozostałe są pomijane z ostrzeżeniem.
 
 **Pozostałe**
-- Baza leży obok pliku konfiguracyjnego (`marian-knows.db`, `-wal`, `-shm`), lokalizacji nie da się zmienić. Jedno `marian-knows.yml` = jedna baza; treści publiczne i wewnętrzne rozdziela się w v1 osobnymi `marian-knows.yml`.
+- Baza leży w katalogu `.marian-knows/` obok pliku konfiguracyjnego (`index.db`, `-wal`, `-shm`), lokalizacji nie da się zmienić. Katalog powstaje przy pierwszym indeksowaniu; jako ukryty nigdy nie jest skanowany. Jedno `marian-knows.yml` = jedna baza; treści publiczne i wewnętrzne rozdziela się w v1 osobnymi `marian-knows.yml`.
 - Wybór konfiguracji: `--config <plik>`, potem `MARIAN_KNOWS_CONFIG`, potem `marian-knows.yml` szukany w górę od bieżącego katalogu. Wyjątek: `init` używa tylko `--config` albo `./marian-knows.yml`.
 
 ## 4. Indeks
@@ -137,7 +137,7 @@ Opcja globalna: `--config <plik>` (dla `init`: plik, który ma zostać utworzony
 
 **`parse <file>`:** diagnostyka parsera, nie wymaga konfiguracji. Domyślnie wypisuje tytuł, tagi, frontmatter i listę sekcji z podglądem treści; `--json` wypisuje jeden obiekt `{title, tags, frontmatter, sections}`. Ostrzeżenia idą na stderr; nieczytelny plik to kod 2.
 
-**Komendy jeszcze niezaimplementowane:** `index`, `search`, `list`, `get`, `status` i `destroy` są rozpoznawane przez CLI, przyjmują dowolne opcje, nie mają efektów ubocznych, zwracają kod 0 i wypisują `TODO: implementacja` na stderr. Także z `--json` nie udają jeszcze docelowego kontraktu JSON.
+**Komendy jeszcze niezaimplementowane:** `search`, `list`, `get`, `status` i `destroy` są rozpoznawane przez CLI, przyjmują dowolne opcje, nie mają efektów ubocznych, zwracają kod 0 i wypisują `TODO: implementacja` na stderr. Także z `--json` nie udają jeszcze docelowego kontraktu JSON.
 
 Domyślne wyjście: jeden plik na linię, ścieżka wirtualna.
 

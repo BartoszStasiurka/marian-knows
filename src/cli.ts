@@ -7,7 +7,9 @@ import {
   initConfig,
   loadConfig,
   parseFile,
+  rebuildIndex,
   scanSource,
+  type LoadedConfig,
   type ParsedDoc,
 } from "./core/index.js";
 
@@ -17,10 +19,10 @@ Commands:
   init <project_name>   Create a minimal marian-knows.yml (never overwrites)
   scan                  Scan the source directory and print virtual paths (dry run, no index)
   parse <file>          Parse a Markdown file given by disk path (diagnostic, no config needed)
+  index                 Rebuild the index (.marian-knows/index.db next to the config)
   help                  Show this help
 
 Not implemented yet:
-  index [--full]        Build or update the index
   search <query>        Search the index
   list                  List indexed files
   get <path>            Print a file by virtual path
@@ -41,15 +43,21 @@ const OPTIONS = {
 } as const;
 
 /** Recognised but not implemented: no side effects, exit 0. */
-const STUBS = new Set(["index", "search", "list", "get", "status", "destroy"]);
+const STUBS = new Set(["search", "list", "get", "status", "destroy"]);
 
-async function scan(values: { config?: string; json?: boolean; disk?: boolean }): Promise<number> {
-  const configPath = findConfig({ explicit: values.config });
+/** Finds and loads the config; prints an error and returns null when there is none. */
+function requireConfig(explicit: string | undefined): LoadedConfig | null {
+  const configPath = findConfig({ explicit });
   if (!configPath) {
     console.error("Config not found. Use --config, MARIAN_KNOWS_CONFIG or run: marian-knows init <project_name>");
-    return 2;
+    return null;
   }
-  const config = loadConfig(configPath);
+  return loadConfig(configPath);
+}
+
+async function scan(values: { config?: string; json?: boolean; disk?: boolean }): Promise<number> {
+  const config = requireConfig(values.config);
+  if (!config) return 2;
   const { files, warnings } = await scanSource(config);
 
   for (const w of warnings) console.error(`! warning: ${w}`);
@@ -62,6 +70,18 @@ async function scan(values: { config?: string; json?: boolean; disk?: boolean })
     for (const f of files) console.log(values.disk ? `${f.virtualPath}\t${f.diskPath}` : f.virtualPath);
   }
   console.error(`Files: ${files.length}`);
+  return 0;
+}
+
+async function index(values: { config?: string }): Promise<number> {
+  const config = requireConfig(values.config);
+  if (!config) return 2;
+  const started = performance.now();
+  const r = await rebuildIndex(config);
+  const seconds = ((performance.now() - started) / 1000).toFixed(1);
+  console.log(`Plików .md: ${r.files}`);
+  console.log(`+ ${r.added} nowych, ~ ${r.changed} zmienionych, - ${r.removed} usuniętych (${seconds} s)`);
+  for (const w of r.warnings) console.error(`! warning: ${w}`);
   return 0;
 }
 
@@ -152,6 +172,8 @@ async function main(argv: string[]): Promise<number> {
         return init(args[0], values);
       case "parse":
         return parse(args[0], values);
+      case "index":
+        return await index(values);
       default:
         console.error(`Unknown command: ${command}\n\n${USAGE}`);
         return 2;

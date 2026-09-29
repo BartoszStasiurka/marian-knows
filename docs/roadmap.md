@@ -36,16 +36,16 @@ Pure functions, no DB.
 - [x] `parse <file>` command: human-readable output
 - [x] `parse <file> --json`
 
-## 3. Index
+## 3. Index (done)
 
-- [ ] Ask about and add `better-sqlite3`
-- [ ] DB location: `marian-knows.db` next to the config, WAL mode
-- [ ] Schema: `meta`, `docs`, `sections`, `sections_fts` (`unicode61 remove_diacritics 2`)
-- [ ] Store `schema_version` and `indexed_at` in `meta`
-- [ ] Full rebuild: scan → parse → insert in one transaction
-- [ ] Unreadable file: warning, continue
-- [ ] `index` command with summary output (file count, +/~/-, time, warnings)
-- [ ] Test: index contains virtual paths only
+- [x] Ask about and add `better-sqlite3`
+- [x] DB location: `.marian-knows/index.db` next to the config (create the directory on first index), WAL mode
+- [x] Schema: `meta`, `docs`, `sections`, `sections_fts` (`unicode61 remove_diacritics 2`)
+- [x] Store `schema_version` and `indexed_at` in `meta`
+- [x] Full rebuild: scan → parse → insert in one transaction
+- [x] Unreadable file: warning, continue
+- [x] `index` command with summary output (file count, +/~/-, time, warnings)
+- [x] Test: index contains virtual paths only
 
 ## 4. Incremental sync
 
@@ -63,6 +63,14 @@ Pure functions, no DB.
 - [ ] Basic FTS5 query over sections, `bm25` with weights (title 10, tags 5, heading 5, body 1)
 - [ ] Group by file: rank by best section, return its anchor
 - [ ] Strip FTS5 special characters from the query
+- [ ] Fold `ł`/`Ł` to `l`/`L`. The `unicode61 remove_diacritics 2` tokenizer strips only letters with a Unicode
+  decomposition (ą ć ę ń ó ś ź ż), and `ł` has none, so `zolw` does not find `żółw` (only `zołw` does).
+  - Fold the FTS columns (`title`, `heading`, `tags`, `body`) at index time and the query at search time;
+    `docs` and `sections` keep the original text.
+  - Snippets: the folding is one UTF-16 unit for one, so positions match. Run `highlight()` on the folded
+    column and copy the markers onto `sections.body` at the same offsets, then trim to a snippet in code.
+  - Bump `schema_version` (the stage 4 mismatch check rebuilds existing indexes).
+  - Tests: `zolw` finds `żółw`, `lodz` finds `Łódź`, the snippet shows the original `ł`.
 - [ ] Stop words (built-in PL/EN list); keep all if only stop words remain
 - [ ] Prefix inflection: words > 5 chars lose 2 last letters, all matched as prefix
 - [ ] AND mode by default
@@ -85,10 +93,13 @@ Pure functions, no DB.
 - [ ] `list` with `--tag`, `--path`, `--exclude-path`, sorted by path
 - [ ] `get <path>`: resolve to disk only inside the source dir
 - [ ] `status` (config, file and section counts, DB size, index time and age)
-- [ ] `destroy` (DB, `-wal`, `-shm`)
+- [ ] `destroy` (the `.marian-knows/` directory)
 - [ ] `--json` contract for `search`, `list`, `status` (bare array, `null` / `[]` for missing)
 - [ ] `--json`: stdout JSON only, warnings on stderr, `[]` + exit 1 on no results
 - [ ] Exit codes audit across all commands
+- [ ] One language for CLI messages. Now mixed: the `index` summary is Polish (spec example), while
+  warnings (`! warning:`), errors and help are English and the spec shows `! ostrzeżenie:`. Pick one
+  for all commands, align `docs/requirements.md` and the tests.
 
 ## 7. Quality set
 

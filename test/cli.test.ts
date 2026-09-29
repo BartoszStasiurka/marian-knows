@@ -183,10 +183,38 @@ describe.concurrent("parse", () => {
   });
 });
 
+describe.concurrent("index", () => {
+  it("builds the index next to the config and prints a summary", async () => {
+    const dir = makeTree({ "marian-knows.yml": "name: P\npath: ./docs\n", "docs/a.md": "# A", "docs/b/c.md": "c" });
+    mkdirSync(path.join(dir, "sub"));
+    const r = await runCli(["index"], { cwd: path.join(dir, "sub") });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/^Plików \.md: 2\n\+ 2 nowych, ~ 0 zmienionych, - 0 usuniętych \(\d+\.\d s\)\n$/);
+    expect(r.stderr).toBe("");
+    expect(readdirSync(path.join(dir, ".marian-knows"))).toContain("index.db");
+  });
+
+  it("reports changes on the next run and warnings on stderr", async () => {
+    const dir = makeTree({ "marian-knows.yml": "name: P\n", "a.md": "a", "b.md": "b" });
+    expect((await runCli(["index"], { cwd: dir })).code).toBe(0);
+    writeFileSync(path.join(dir, "a.md"), "---\n: [\n---\nnew");
+    writeFileSync(path.join(dir, "c.md"), "c");
+    const r = await runCli(["index"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("+ 1 nowych, ~ 1 zmienionych, - 0 usuniętych");
+    expect(r.stderr).toMatch(/^! warning: \/a\.md: broken frontmatter/);
+  });
+
+  it("fails with exit 2 without a config and creates nothing", async () => {
+    const dir = makeTree({ "a.md": "a" });
+    const r = await runCli(["index"], { cwd: dir });
+    expect(r.code).toBe(2);
+    expect(snapshot(dir)).toEqual({ "a.md": "a" });
+  });
+});
+
 describe.concurrent("stub commands", () => {
   it.each([
-    ["index"],
-    ["index", "--full"],
     ["search", "backup", "-n", "5", "--json"],
     ["list", "--json"],
     ["get", "/a.md"],
@@ -195,7 +223,7 @@ describe.concurrent("stub commands", () => {
     ["destroy"],
     ["--config", "marian-knows.yml", "destroy"],
   ].map((args) => ({ args })))("$args has no side effects and exits 0", async ({ args }) => {
-    const dir = makeTree({ "marian-knows.yml": "name: P\n", "a.md": "# A", "marian-knows.db": "x" });
+    const dir = makeTree({ "marian-knows.yml": "name: P\n", "a.md": "# A", ".marian-knows/index.db": "x" });
     const before = snapshot(dir);
     const r = await runCli(args, { cwd: dir });
     expect(r.code).toBe(0);

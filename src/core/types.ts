@@ -39,3 +39,14 @@ export interface ParsedDoc {
   sections: Section[];
   warnings: string[];
 }
+
+export interface IndexResult {
+  /** Files indexed. */
+  files: number;
+  sections: number;
+  /** Compared with the previous index content: new paths, same path with a different hash, paths gone. */
+  added: number;
+  changed: number;
+  removed: number;
+  warnings: string[];
+}
