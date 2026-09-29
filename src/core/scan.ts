@@ -46,6 +46,7 @@ export async function scanSource(config: LoadedConfig): Promise<ScanResult> {
       virtualPath: "/" + e.path.normalize("NFC"),
       diskPath: path.join(config.sourceDir, e.path),
       size: e.stats?.size ?? 0,
+      mtime: Math.floor(e.stats?.mtimeMs ?? 0),
     }))
     .filter((f) => admit(f, warnings))
     .sort((a, b) => cmp(a.virtualPath, b.virtualPath));

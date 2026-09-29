@@ -3,12 +3,13 @@ import { parseArgs } from "node:util";
 import {
   CONFIG_FILENAME,
   ConfigError,
+  IndexLockedError,
   findConfig,
   initConfig,
   loadConfig,
   parseFile,
-  rebuildIndex,
   scanSource,
+  syncIndex,
   type LoadedConfig,
   type ParsedDoc,
 } from "./core/index.js";
@@ -19,7 +20,7 @@ Commands:
   init <project_name>   Create a minimal marian-knows.yml (never overwrites)
   scan                  Scan the source directory and print virtual paths (dry run, no index)
   parse <file>          Parse a Markdown file given by disk path (diagnostic, no config needed)
-  index                 Rebuild the index (.marian-knows/index.db next to the config)
+  index [--full]        Sync the index (.marian-knows/index.db next to the config)
   help                  Show this help
 
 Not implemented yet:
@@ -33,12 +34,14 @@ Options:
   --config <file>   Path to marian-knows.yml (for init: the file to create)
   --json            JSON output (scan, parse)
   --disk            Include disk paths (scan; diagnostic only)
+  --full            Rebuild the index from scratch (index)
   -h, --help        Show this help`;
 
 const OPTIONS = {
   config: { type: "string" },
   json: { type: "boolean" },
   disk: { type: "boolean" },
+  full: { type: "boolean" },
   help: { type: "boolean", short: "h" },
 } as const;
 
@@ -73,11 +76,11 @@ async function scan(values: { config?: string; json?: boolean; disk?: boolean })
   return 0;
 }
 
-async function index(values: { config?: string }): Promise<number> {
+async function index(values: { config?: string; full?: boolean }): Promise<number> {
   const config = requireConfig(values.config);
   if (!config) return 2;
   const started = performance.now();
-  const r = await rebuildIndex(config);
+  const r = await syncIndex(config, { full: values.full });
   const seconds = ((performance.now() - started) / 1000).toFixed(1);
   console.log(`Plików .md: ${r.files}`);
   console.log(`+ ${r.added} nowych, ~ ${r.changed} zmienionych, - ${r.removed} usuniętych (${seconds} s)`);
@@ -137,7 +140,7 @@ function init(name: string | undefined, values: { config?: string }): number {
 }
 
 async function main(argv: string[]): Promise<number> {
-  // Stubs accept any options (e.g. `index --full`), so detect them before strict parsing.
+  // Stubs accept any options (e.g. `search -n 5`), so detect them before strict parsing.
   const [loose] = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true, strict: false }).positionals;
   if (loose !== undefined && STUBS.has(loose)) {
     console.error("TODO: implementacja");
@@ -181,6 +184,10 @@ async function main(argv: string[]): Promise<number> {
   } catch (e) {
     if (e instanceof ConfigError) {
       for (const err of e.errors) console.error(`error: ${err}`);
+      return 2;
+    }
+    if (e instanceof IndexLockedError) {
+      console.error(`error: ${e.message}`);
       return 2;
     }
     throw e;

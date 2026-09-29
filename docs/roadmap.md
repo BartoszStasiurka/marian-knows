@@ -47,16 +47,16 @@ Pure functions, no DB.
 - [x] `index` command with summary output (file count, +/~/-, time, warnings)
 - [x] Test: index contains virtual paths only
 
-## 4. Incremental sync
+## 4. Incremental sync (done)
 
-- [ ] Diff file set against `docs`: new, deleted, possibly changed (`mtime` / `size`)
-- [ ] Hash possibly changed files; same hash = update `mtime` only
-- [ ] Changed hash: re-index all sections of the file
-- [ ] Deleted and newly excluded files are removed
-- [ ] Whole sync in one transaction
-- [ ] Lock against parallel `index` runs
-- [ ] `schema_version` mismatch triggers a full rebuild
-- [ ] `index --full`
+- [x] Diff file set against `docs`: new, deleted, possibly changed (`mtime` / `size`)
+- [x] Hash possibly changed files; same hash = update `mtime` only
+- [x] Changed hash: re-index all sections of the file
+- [x] Deleted and newly excluded files are removed
+- [x] Whole sync in one transaction
+- [x] Lock against parallel `index` runs
+- [x] `schema_version` mismatch triggers a full rebuild
+- [x] `index --full`
 
 ## 5. Search
 

@@ -93,6 +93,9 @@ CREATE VIRTUAL TABLE sections_fts USING fts5(         -- rowid = sections.id
 **Pełna przebudowa:** przy niezgodności `schema_version` (schemat, tokenizer, parser sekcji) albo ręcznie `marian-knows index --full`.
 
 **Odporność i współbieżność:** WAL (`search` działa w trakcie `index`), blokada przed równoległymi `index`, nieczytelny plik to ostrzeżenie i kontynuacja. `status` pokazuje wiek indeksu.
+- Blokada to plik `.marian-knows/index.lock` z PID właściciela, zakładany atomowo i usuwany po zakończeniu. Gdy trzyma go żywy proces, `index` kończy się błędem `index is already running (pid N)` (kod 2); blokada po martwym procesie jest przejmowana.
+- Plik, którego nie da się odczytać, jest traktowany jak nieobecny: jego poprzednia wersja znika z indeksu. Plik bez zmian `mtime` i `size` nie jest czytany, więc zostaje.
+- Błąd w trakcie synchronizacji wycofuje całą transakcję; indeks zostaje w poprzednim stanie.
 
 ## 5. Wyszukiwanie
 

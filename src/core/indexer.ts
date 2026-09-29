@@ -1,15 +1,17 @@
 import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, statSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeSync } from "node:fs";
 import path from "node:path";
+import { IndexLockedError } from "./errors.js";
 import { decodeMarkdown, parseMarkdown } from "./parse.js";
 import { scanSource } from "./scan.js";
-import type { IndexResult, LoadedConfig } from "./types.js";
+import type { IndexResult, LoadedConfig, ScannedFile } from "./types.js";
 
 /** Bump when the schema, tokenizer or section parser changes. */
 export const SCHEMA_VERSION = "1";
 export const INDEX_DIRNAME = ".marian-knows";
 export const INDEX_FILENAME = "index.db";
+export const LOCK_FILENAME = "index.lock";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
@@ -29,6 +31,13 @@ CREATE VIRTUAL TABLE IF NOT EXISTS sections_fts USING fts5(
 );
 `;
 
+const DROP_ALL = `
+DROP TABLE IF EXISTS sections_fts;
+DROP TABLE IF EXISTS sections;
+DROP TABLE IF EXISTS docs;
+DROP TABLE IF EXISTS meta;
+`;
+
 /** Disk path of the index database for a config: `.marian-knows/index.db` next to the config file. */
 export function indexPath(config: LoadedConfig): string {
   return path.join(config.configDir, INDEX_DIRNAME, INDEX_FILENAME);
@@ -45,81 +54,203 @@ export function openIndex(config: LoadedConfig): Database.Database {
   return db;
 }
 
-interface ReadDoc {
-  virtualPath: string;
-  bytes: Buffer;
-  mtime: number;
-  size: number;
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    // EPERM: the process exists but belongs to someone else.
+    return (e as NodeJS.ErrnoException).code === "EPERM";
+  }
 }
 
 /**
- * Full rebuild: scan, parse every file, replace the whole index in one transaction.
- * Counts added / changed / removed against the previous index content (by path and hash).
+ * Takes `.marian-knows/index.lock` (holds the owner's pid). A lock left by a dead process is taken over.
+ * Throws IndexLockedError when a live process holds it. Returns the release function.
  */
-export async function rebuildIndex(config: LoadedConfig): Promise<IndexResult> {
-  const { files, warnings } = await scanSource(config);
-
-  // Read outside the transaction; an unreadable file is a warning, not a failure.
-  const docs: ReadDoc[] = [];
-  for (const f of files) {
+export function acquireIndexLock(config: LoadedConfig): () => void {
+  const file = path.join(config.configDir, INDEX_DIRNAME, LOCK_FILENAME);
+  mkdirSync(path.dirname(file), { recursive: true });
+  for (let attempt = 0; ; attempt++) {
     try {
-      const st = statSync(f.diskPath);
-      docs.push({ virtualPath: f.virtualPath, bytes: readFileSync(f.diskPath), mtime: Math.floor(st.mtimeMs), size: st.size });
+      const fd = openSync(file, "wx");
+      writeSync(fd, String(process.pid));
+      closeSync(fd);
+      return () => unlinkSync(file);
     } catch (e) {
-      warnings.push(`skipped ${f.virtualPath}: cannot read (${(e as NodeJS.ErrnoException).code ?? (e as Error).message})`);
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    }
+    let pid = NaN;
+    try {
+      pid = Number.parseInt(readFileSync(file, "utf8"), 10);
+    } catch {
+      // Released in the meantime: retry.
+    }
+    if (attempt > 0 || (Number.isInteger(pid) && pid > 0 && isAlive(pid))) throw new IndexLockedError(pid);
+    try {
+      unlinkSync(file);
+    } catch {
+      // Someone else removed the stale lock first; the retry decides who wins.
     }
   }
+}
 
-  const db = openIndex(config);
+interface IndexedDoc {
+  id: number;
+  path: string;
+  mtime: number;
+  size: number;
+  hash: string;
+}
+
+const sha256 = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
+
+function readMeta(db: Database.Database, key: string): string | undefined {
+  return (db.prepare("SELECT value FROM meta WHERE key = ?").get(key) as { value: string } | undefined)?.value;
+}
+
+export interface IndexOptions {
+  /** Drop everything and index from scratch. Also forced by a `schema_version` mismatch. */
+  full?: boolean;
+}
+
+/**
+ * Brings the index in line with the source directory, under the index lock and in one transaction.
+ * Incremental: new paths are indexed, missing ones (deleted, newly excluded, unreadable) removed,
+ * and a file whose `mtime` or `size` differs is hashed; same hash = only `mtime`/`size` updated,
+ * a different hash = all its sections re-indexed. A full rebuild drops and recreates every table.
+ * Counts added / changed / removed against the previous index content in both modes.
+ */
+export async function syncIndex(config: LoadedConfig, options: IndexOptions = {}): Promise<IndexResult> {
+  const release = acquireIndexLock(config);
   try {
-    const previous = new Map(
-      (db.prepare("SELECT path, hash FROM docs").all() as { path: string; hash: string }[]).map((r) => [r.path, r.hash]),
-    );
+    const { files, warnings } = await scanSource(config);
+    const db = openIndex(config);
+    try {
+      return sync(db, files, warnings, options.full ?? false);
+    } finally {
+      db.close();
+    }
+  } finally {
+    release();
+  }
+}
+
+/** Full rebuild; same as `syncIndex(config, { full: true })`. */
+export function rebuildIndex(config: LoadedConfig): Promise<IndexResult> {
+  return syncIndex(config, { full: true });
+}
+
+function sync(db: Database.Database, files: ScannedFile[], warnings: string[], forceFull: boolean): IndexResult {
+  const result: IndexResult = { full: false, files: 0, sections: 0, added: 0, changed: 0, removed: 0, warnings };
+
+  db.transaction(() => {
+    result.full = forceFull || readMeta(db, "schema_version") !== SCHEMA_VERSION;
+    let indexed = new Map<string, IndexedDoc>();
+    try {
+      indexed = new Map(
+        (db.prepare("SELECT id, path, mtime, size, hash FROM docs").all() as IndexedDoc[]).map((d) => [d.path, d]),
+      );
+    } catch (e) {
+      // An index from another schema version may lack these columns; it is rebuilt anyway.
+      if (!result.full) throw e;
+    }
+
+    // A full rebuild starts from empty tables but still reports changes against the old content.
+    const previousHash = new Map([...indexed].map(([p, d]) => [p, d.hash]));
+    if (result.full) {
+      db.exec(DROP_ALL);
+      db.exec(SCHEMA);
+      indexed.clear();
+    }
 
     const insertDoc = db.prepare(
       "INSERT INTO docs(path, title, tags, fm, mtime, size, hash) VALUES (?, ?, ?, ?, ?, ?, ?)",
     );
+    const updateDoc = db.prepare("UPDATE docs SET title = ?, tags = ?, fm = ?, mtime = ?, size = ?, hash = ? WHERE id = ?");
+    const touchDoc = db.prepare("UPDATE docs SET mtime = ?, size = ? WHERE id = ?");
+    const deleteDoc = db.prepare("DELETE FROM docs WHERE id = ?");
     const insertSection = db.prepare("INSERT INTO sections(doc_id, ord, anchor, heading, body) VALUES (?, ?, ?, ?, ?)");
     const insertFts = db.prepare("INSERT INTO sections_fts(rowid, title, heading, tags, body) VALUES (?, ?, ?, ?, ?)");
+    const deleteSections = db.prepare("DELETE FROM sections WHERE doc_id = ?");
+    const deleteFts = db.prepare("DELETE FROM sections_fts WHERE rowid IN (SELECT id FROM sections WHERE doc_id = ?)");
     const setMeta = db.prepare("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)");
 
-    const result: IndexResult = { files: docs.length, sections: 0, added: 0, changed: 0, removed: 0, warnings };
+    const dropSections = (docId: number) => {
+      deleteFts.run(docId);
+      deleteSections.run(docId);
+    };
 
-    db.transaction(() => {
-      db.exec("DELETE FROM sections_fts; DELETE FROM sections; DELETE FROM docs;");
-      for (const d of docs) {
-        const hash = createHash("sha256").update(d.bytes).digest("hex");
-        const old = previous.get(d.virtualPath);
-        if (old === undefined) result.added++;
-        else if (old !== hash) result.changed++;
-        previous.delete(d.virtualPath);
-
-        const parsed = parseMarkdown(decodeMarkdown(d.bytes), path.posix.basename(d.virtualPath));
-        for (const w of parsed.warnings) warnings.push(`${d.virtualPath}: ${w}`);
-
-        const docId = insertDoc.run(
-          d.virtualPath,
-          parsed.title,
-          JSON.stringify(parsed.tags),
-          parsed.frontmatter ? JSON.stringify(parsed.frontmatter) : null,
-          d.mtime,
-          d.size,
-          hash,
-        ).lastInsertRowid;
-        const ftsTags = parsed.tags.join(" ");
-        for (const s of parsed.sections) {
-          const sectionId = insertSection.run(docId, s.ord, s.anchor, s.heading, s.body).lastInsertRowid;
-          insertFts.run(sectionId, parsed.title, s.heading, ftsTags, s.body);
-          result.sections++;
-        }
+    /** Parses and stores a file; `docId` given = replace that row's content, keeping its id. */
+    const store = (f: ScannedFile, bytes: Buffer, hash: string, docId?: number) => {
+      const parsed = parseMarkdown(decodeMarkdown(bytes), path.posix.basename(f.virtualPath));
+      for (const w of parsed.warnings) warnings.push(`${f.virtualPath}: ${w}`);
+      const meta = [
+        parsed.title,
+        JSON.stringify(parsed.tags),
+        parsed.frontmatter ? JSON.stringify(parsed.frontmatter) : null,
+        f.mtime,
+        f.size,
+        hash,
+      ] as const;
+      if (docId === undefined) {
+        docId = Number(insertDoc.run(f.virtualPath, ...meta).lastInsertRowid);
+      } else {
+        dropSections(docId);
+        updateDoc.run(...meta, docId);
       }
-      result.removed = previous.size;
-      setMeta.run("schema_version", SCHEMA_VERSION);
-      setMeta.run("indexed_at", new Date().toISOString());
-    })();
+      const ftsTags = parsed.tags.join(" ");
+      for (const s of parsed.sections) {
+        const sectionId = insertSection.run(docId, s.ord, s.anchor, s.heading, s.body).lastInsertRowid;
+        insertFts.run(sectionId, parsed.title, s.heading, ftsTags, s.body);
+      }
+    };
 
-    return result;
-  } finally {
-    db.close();
-  }
+    for (const f of files) {
+      const old = indexed.get(f.virtualPath);
+      if (old && old.mtime === f.mtime && old.size === f.size) {
+        indexed.delete(f.virtualPath);
+        continue;
+      }
+
+      let bytes: Buffer;
+      try {
+        bytes = readFileSync(f.diskPath);
+      } catch (e) {
+        // Unreadable: treated as absent, so a previously indexed version is removed below.
+        warnings.push(`skipped ${f.virtualPath}: cannot read (${(e as NodeJS.ErrnoException).code ?? (e as Error).message})`);
+        continue;
+      }
+      // Stat and read are separate steps; store what was actually read.
+      const current = { ...f, size: bytes.length };
+      const hash = sha256(bytes);
+
+      if (old) {
+        indexed.delete(f.virtualPath);
+        if (old.hash === hash) touchDoc.run(current.mtime, current.size, old.id);
+        else store(current, bytes, hash, old.id);
+      } else {
+        store(current, bytes, hash);
+      }
+
+      const before = previousHash.get(f.virtualPath);
+      if (before === undefined) result.added++;
+      else if (before !== hash) result.changed++;
+    }
+
+    // Whatever is left was not in the file set (or could not be read).
+    for (const d of indexed.values()) {
+      dropSections(d.id);
+      deleteDoc.run(d.id);
+    }
+    const present = new Set((db.prepare("SELECT path FROM docs").all() as { path: string }[]).map((r) => r.path));
+    result.removed = [...previousHash.keys()].filter((p) => !present.has(p)).length;
+
+    result.files = present.size;
+    result.sections = (db.prepare("SELECT count(*) AS n FROM sections").get() as { n: number }).n;
+    setMeta.run("schema_version", SCHEMA_VERSION);
+    setMeta.run("indexed_at", new Date().toISOString());
+  }).immediate();
+
+  return result;
 }

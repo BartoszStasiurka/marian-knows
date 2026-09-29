@@ -1,8 +1,17 @@
 import Database from "better-sqlite3";
-import { chmodSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { SCHEMA_VERSION, indexPath, loadConfig, rebuildIndex } from "../src/core/index.js";
+import {
+  IndexLockedError,
+  LOCK_FILENAME,
+  SCHEMA_VERSION,
+  acquireIndexLock,
+  indexPath,
+  loadConfig,
+  rebuildIndex,
+  syncIndex,
+} from "../src/core/index.js";
 import { makeTree } from "./helpers.js";
 
 function project(files: Record<string, string>, yaml = "name: T\n") {
@@ -138,5 +147,194 @@ describe("rebuildIndex", () => {
       expect(content).not.toContain(dir);
       expect(content).not.toContain(path.join(dir, "docs"));
     }
+  });
+});
+
+function exec(dbFile: string, sql: string) {
+  const db = new Database(dbFile);
+  try {
+    db.exec(sql);
+  } finally {
+    db.close();
+  }
+}
+
+/** Section ids per path: a re-indexed file gets new ids, an untouched one keeps them. */
+function sectionIds(config: ReturnType<typeof loadConfig>): Record<string, number[]> {
+  const rows = query<{ path: string; id: number }>(
+    indexPath(config),
+    "SELECT d.path, s.id FROM sections s JOIN docs d ON d.id = s.doc_id ORDER BY s.id",
+  );
+  const out: Record<string, number[]> = {};
+  for (const r of rows) (out[r.path] ??= []).push(r.id);
+  return out;
+}
+
+/** Sets the file's mtime to a fixed point, so tests do not depend on clock resolution. */
+function setMtime(file: string, seconds: number) {
+  utimesSync(file, seconds, seconds);
+}
+
+describe("syncIndex", () => {
+  it("indexes everything on the first run, as a full rebuild", async () => {
+    const { config } = project({ "a.md": "# A\n\nalpha", "b.md": "# B\n\nbeta" });
+    expect(await syncIndex(config)).toMatchObject({ full: true, files: 2, sections: 2, added: 2, changed: 0, removed: 0 });
+  });
+
+  it("does nothing when no file changed", async () => {
+    const { config } = project({ "a.md": "# A\n\nalpha", "b.md": "# B\n\nbeta" });
+    await syncIndex(config);
+    const ids = sectionIds(config);
+    expect(await syncIndex(config)).toMatchObject({ full: false, files: 2, sections: 2, added: 0, changed: 0, removed: 0 });
+    expect(sectionIds(config)).toEqual(ids);
+  });
+
+  it("re-indexes only files whose content changed", async () => {
+    const { dir, config } = project({ "keep.md": "# Keep\n\nkept", "edit.md": "# Edit\n\nv1" });
+    await syncIndex(config);
+    const ids = sectionIds(config);
+
+    writeFileSync(path.join(dir, "edit.md"), "# Edited\n\nversion two");
+    expect(await syncIndex(config)).toMatchObject({ full: false, files: 2, added: 0, changed: 1, removed: 0 });
+
+    const after = sectionIds(config);
+    expect(after["/keep.md"]).toEqual(ids["/keep.md"]);
+    expect(query(indexPath(config), "SELECT title FROM docs WHERE path = '/edit.md'")).toEqual([{ title: "Edited" }]);
+    // Old FTS rows of the file are gone, new ones are there.
+    const match = (q: string) => query(indexPath(config), "SELECT rowid FROM sections_fts WHERE sections_fts MATCH ?", q).length;
+    expect(match("v1")).toBe(0);
+    expect(match("two")).toBe(1);
+    expect(query(indexPath(config), "SELECT rowid FROM sections_fts")).toHaveLength(2);
+  });
+
+  it("only updates mtime when the file was touched but its hash is the same", async () => {
+    const { dir, config } = project({ "a.md": "# A" });
+    const file = path.join(dir, "a.md");
+    setMtime(file, 1_000_000);
+    await syncIndex(config);
+    const ids = sectionIds(config);
+
+    setMtime(file, 2_000_000);
+    expect(await syncIndex(config)).toMatchObject({ added: 0, changed: 0, removed: 0 });
+    expect(sectionIds(config)).toEqual(ids);
+    expect(query(indexPath(config), "SELECT mtime FROM docs")).toEqual([{ mtime: 2_000_000_000 }]);
+  });
+
+  it("detects a same-size change through the hash", async () => {
+    const { dir, config } = project({ "a.md": "aaaa" });
+    const file = path.join(dir, "a.md");
+    setMtime(file, 1_000_000);
+    await syncIndex(config);
+
+    writeFileSync(file, "bbbb");
+    setMtime(file, 2_000_000);
+    expect(await syncIndex(config)).toMatchObject({ changed: 1 });
+    expect(query(indexPath(config), "SELECT body FROM sections")).toEqual([{ body: "bbbb" }]);
+  });
+
+  it("trusts mtime and size: an edit that keeps both is only picked up by --full", async () => {
+    const { dir, config } = project({ "a.md": "aaaa" });
+    const file = path.join(dir, "a.md");
+    setMtime(file, 1_000_000);
+    await syncIndex(config);
+
+    writeFileSync(file, "bbbb");
+    setMtime(file, 1_000_000);
+    expect(await syncIndex(config)).toMatchObject({ changed: 0 });
+    expect(await syncIndex(config, { full: true })).toMatchObject({ full: true, changed: 1 });
+    expect(query(indexPath(config), "SELECT body FROM sections")).toEqual([{ body: "bbbb" }]);
+  });
+
+  it("removes deleted files and files that became excluded", async () => {
+    const { dir } = project({ "a.md": "a", "gone.md": "g", "draft/d.md": "d" });
+    const configFile = path.join(dir, "marian-knows.yml");
+    await syncIndex(loadConfig(configFile));
+
+    rmSync(path.join(dir, "gone.md"));
+    writeFileSync(configFile, 'name: T\nexclude: "draft/**"\n');
+    const config = loadConfig(configFile);
+    expect(await syncIndex(config)).toMatchObject({ full: false, files: 1, sections: 1, added: 0, changed: 0, removed: 2 });
+    expect(query(indexPath(config), "SELECT path FROM docs")).toEqual([{ path: "/a.md" }]);
+    expect(query(indexPath(config), "SELECT rowid FROM sections_fts")).toHaveLength(1);
+  });
+
+  it.skipIf(process.getuid?.() === 0)("removes a changed file that became unreadable", async () => {
+    const { dir, config } = project({ "ok.md": "ok", "locked.md": "secret" });
+    await syncIndex(config);
+    const file = path.join(dir, "locked.md");
+    writeFileSync(file, "secret, changed");
+    chmodSync(file, 0o000);
+    try {
+      const r = await syncIndex(config);
+      expect(r).toMatchObject({ files: 1, removed: 1 });
+      expect(r.warnings).toEqual([expect.stringMatching(/^skipped \/locked\.md: cannot read/)]);
+    } finally {
+      chmodSync(file, 0o644);
+    }
+  });
+
+  it("rebuilds from scratch on a schema_version mismatch", async () => {
+    const { config } = project({ "a.md": "# A\n\nalpha" });
+    await syncIndex(config);
+    exec(indexPath(config), "UPDATE meta SET value = 'old' WHERE key = 'schema_version'");
+
+    expect(await syncIndex(config)).toMatchObject({ full: true, files: 1, added: 0, changed: 0, removed: 0 });
+    expect(query(indexPath(config), "SELECT body FROM sections")).toEqual([{ body: "alpha" }]);
+    expect(query<{ value: string }>(indexPath(config), "SELECT value FROM meta WHERE key = 'schema_version'")[0]!.value).toBe(
+      SCHEMA_VERSION,
+    );
+  });
+
+  it("rebuilds an index whose tables have an older layout", async () => {
+    const { config } = project({ "a.md": "# A\n\nalpha" });
+    await syncIndex(config);
+    exec(
+      indexPath(config),
+      `DROP TABLE sections_fts; DROP TABLE sections; DROP TABLE docs; DELETE FROM meta;
+       CREATE TABLE docs(id INTEGER PRIMARY KEY, file TEXT);`,
+    );
+    expect(await syncIndex(config)).toMatchObject({ full: true, files: 1, sections: 1, added: 1 });
+  });
+
+  it("keeps the index untouched when the sync fails", async () => {
+    const { dir, config } = project({ "a.md": "# A" });
+    await syncIndex(config);
+    writeFileSync(path.join(dir, "b.md"), "# B\n\nbeta");
+    // A trigger that makes the section insert fail: the new doc must not survive the rollback.
+    exec(indexPath(config), "CREATE TRIGGER boom BEFORE INSERT ON sections BEGIN SELECT RAISE(ABORT, 'boom'); END;");
+    await expect(syncIndex(config)).rejects.toThrow("boom");
+    expect(query(indexPath(config), "SELECT path FROM docs")).toEqual([{ path: "/a.md" }]);
+    expect(existsSync(path.join(dir, ".marian-knows", LOCK_FILENAME))).toBe(false);
+  });
+});
+
+describe("index lock", () => {
+  const lockFile = (dir: string) => path.join(dir, ".marian-knows", LOCK_FILENAME);
+
+  it("refuses to run while another live process holds the lock", async () => {
+    const { dir, config } = project({ "a.md": "a" });
+    const release = acquireIndexLock(config);
+    try {
+      await expect(syncIndex(config)).rejects.toBeInstanceOf(IndexLockedError);
+      await expect(syncIndex(config)).rejects.toThrow(`index is already running (pid ${process.pid})`);
+      expect(existsSync(indexPath(config))).toBe(false);
+    } finally {
+      release();
+    }
+    expect(existsSync(lockFile(dir))).toBe(false);
+    expect(await syncIndex(config)).toMatchObject({ files: 1 });
+  });
+
+  it("takes over a lock left by a dead process", async () => {
+    const { dir, config } = project({ "a.md": "a", ".marian-knows/index.lock": "999999999" });
+    expect(await syncIndex(config)).toMatchObject({ files: 1 });
+    expect(existsSync(lockFile(dir))).toBe(false);
+  });
+
+  it("releases the lock after a run", async () => {
+    const { dir, config } = project({ "a.md": "a" });
+    await syncIndex(config);
+    expect(existsSync(lockFile(dir))).toBe(false);
+    expect(statSync(indexPath(config)).isFile()).toBe(true);
   });
 });

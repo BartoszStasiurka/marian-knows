@@ -8,3 +8,14 @@ export class ConfigError extends Error {
     this.errors = errors;
   }
 }
+
+/** Another `index` run holds the lock. */
+export class IndexLockedError extends Error {
+  readonly pid: number;
+
+  constructor(pid: number) {
+    super(`index is already running (pid ${pid})`);
+    this.name = "IndexLockedError";
+    this.pid = pid;
+  }
+}

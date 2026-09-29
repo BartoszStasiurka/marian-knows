@@ -13,6 +13,8 @@ export interface ScannedFile {
   virtualPath: string;
   diskPath: string;
   size: number;
+  /** Modification time in whole milliseconds. */
+  mtime: number;
 }
 
 export interface ScanResult {
@@ -41,7 +43,9 @@ export interface ParsedDoc {
 }
 
 export interface IndexResult {
-  /** Files indexed. */
+  /** True when the index was rebuilt from scratch (`--full` or a `schema_version` mismatch). */
+  full: boolean;
+  /** Files and sections in the index after the run. */
   files: number;
   sections: number;
   /** Compared with the previous index content: new paths, same path with a different hash, paths gone. */

@@ -205,6 +205,23 @@ describe.concurrent("index", () => {
     expect(r.stderr).toMatch(/^! warning: \/a\.md: broken frontmatter/);
   });
 
+  it("--full rebuilds and reports changes against the old index", async () => {
+    const dir = makeTree({ "marian-knows.yml": "name: P\n", "a.md": "a" });
+    expect((await runCli(["index"], { cwd: dir })).code).toBe(0);
+    const r = await runCli(["index", "--full"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("Plików .md: 1\n+ 0 nowych, ~ 0 zmienionych, - 0 usuniętych");
+  });
+
+  it("fails with exit 2 while another index run holds the lock", async () => {
+    // The test runner's own pid is alive for the whole subprocess run.
+    const dir = makeTree({ "marian-knows.yml": "name: P\n", "a.md": "a", ".marian-knows/index.lock": String(process.pid) });
+    const r = await runCli(["index"], { cwd: dir });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toBe(`error: index is already running (pid ${process.pid})\n`);
+    expect(r.stdout).toBe("");
+  });
+
   it("fails with exit 2 without a config and creates nothing", async () => {
     const dir = makeTree({ "a.md": "a" });
     const r = await runCli(["index"], { cwd: dir });

@@ -1,8 +1,6 @@
 node_modules/
 dist/
 coverage/
-marian-knows.db
-marian-knows.db-wal
-marian-knows.db-shm
+.marian-knows/
 .env
 .DS_Store
