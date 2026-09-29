@@ -4,11 +4,13 @@ import {
   CONFIG_FILENAME,
   ConfigError,
   IndexLockedError,
+  IndexMissingError,
   findConfig,
   initConfig,
   loadConfig,
   parseFile,
   scanSource,
+  search as searchIndex,
   syncIndex,
   type LoadedConfig,
   type ParsedDoc,
@@ -21,10 +23,10 @@ Commands:
   scan                  Scan the source directory and print virtual paths (dry run, no index)
   parse <file>          Parse a Markdown file given by disk path (diagnostic, no config needed)
   index [--full]        Sync the index (.marian-knows/index.db next to the config)
+  search <query>        Search the index, one virtual path per line (exit 1: no results)
   help                  Show this help
 
 Not implemented yet:
-  search <query>        Search the index
   list                  List indexed files
   get <path>            Print a file by virtual path
   status                Show project, config and index state
@@ -35,6 +37,10 @@ Options:
   --json            JSON output (scan, parse)
   --disk            Include disk paths (scan; diagnostic only)
   --full            Rebuild the index from scratch (index)
+  -n <limit>        Max number of files (search; default 10)
+  --exact           No word trimming, no prefix match, no OR fallback (search)
+  --tag <tag>       Only files with this tag (search)
+  --snippets        Print a snippet under each path, matches in [...] (search)
   -h, --help        Show this help`;
 
 const OPTIONS = {
@@ -42,11 +48,15 @@ const OPTIONS = {
   json: { type: "boolean" },
   disk: { type: "boolean" },
   full: { type: "boolean" },
+  limit: { type: "string", short: "n" },
+  exact: { type: "boolean" },
+  tag: { type: "string" },
+  snippets: { type: "boolean" },
   help: { type: "boolean", short: "h" },
 } as const;
 
 /** Recognised but not implemented: no side effects, exit 0. */
-const STUBS = new Set(["search", "list", "get", "status", "destroy"]);
+const STUBS = new Set(["list", "get", "status", "destroy"]);
 
 /** Finds and loads the config; prints an error and returns null when there is none. */
 function requireConfig(explicit: string | undefined): LoadedConfig | null {
@@ -86,6 +96,33 @@ async function index(values: { config?: string; full?: boolean }): Promise<numbe
   console.log(`+ ${r.added} nowych, ~ ${r.changed} zmienionych, - ${r.removed} usuniętych (${seconds} s)`);
   for (const w of r.warnings) console.error(`! warning: ${w}`);
   return 0;
+}
+
+async function search(
+  words: string[],
+  values: { config?: string; limit?: string; exact?: boolean; tag?: string; snippets?: boolean },
+): Promise<number> {
+  const query = words.join(" ");
+  if (!query.trim()) {
+    console.error("Missing <query>. Usage: marian-knows search <query> [options]");
+    return 2;
+  }
+  let limit: number | undefined;
+  if (values.limit !== undefined) {
+    limit = /^\d+$/.test(values.limit) ? Number(values.limit) : NaN;
+    if (!(limit >= 1)) {
+      console.error(`error: -n expects a positive integer, got '${values.limit}'`);
+      return 2;
+    }
+  }
+  const config = requireConfig(values.config);
+  if (!config) return 2;
+  const hits = searchIndex(config, query, { limit, exact: values.exact, tag: values.tag, snippets: values.snippets });
+  for (const h of hits) {
+    console.log(h.path);
+    if (h.snippet) console.log(`  ${h.snippet}`);
+  }
+  return hits.length ? 0 : 1;
 }
 
 const PREVIEW_CHARS = 80;
@@ -142,7 +179,9 @@ function init(name: string | undefined, values: { config?: string }): number {
 async function main(argv: string[]): Promise<number> {
   // Stubs accept any options (e.g. `search -n 5`), so detect them before strict parsing.
   const [loose] = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true, strict: false }).positionals;
-  if (loose !== undefined && STUBS.has(loose)) {
+  // The search --json contract comes with stage 6; until then it does not pretend to have one.
+  const jsonSearch = loose === "search" && argv.includes("--json");
+  if (loose !== undefined && (STUBS.has(loose) || jsonSearch)) {
     console.error("TODO: implementacja");
     return 0;
   }
@@ -177,6 +216,8 @@ async function main(argv: string[]): Promise<number> {
         return parse(args[0], values);
       case "index":
         return await index(values);
+      case "search":
+        return await search(args, values);
       default:
         console.error(`Unknown command: ${command}\n\n${USAGE}`);
         return 2;
@@ -188,6 +229,10 @@ async function main(argv: string[]): Promise<number> {
     }
     if (e instanceof IndexLockedError) {
       console.error(`error: ${e.message}`);
+      return 2;
+    }
+    if (e instanceof IndexMissingError) {
+      console.error(e.message);
       return 2;
     }
     throw e;

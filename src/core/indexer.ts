@@ -3,12 +3,13 @@ import { createHash } from "node:crypto";
 import { closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeSync } from "node:fs";
 import path from "node:path";
 import { IndexLockedError } from "./errors.js";
+import { fold } from "./fold.js";
 import { decodeMarkdown, parseMarkdown } from "./parse.js";
 import { scanSource } from "./scan.js";
 import type { IndexResult, LoadedConfig, ScannedFile } from "./types.js";
 
 /** Bump when the schema, tokenizer or section parser changes. */
-export const SCHEMA_VERSION = "1";
+export const SCHEMA_VERSION = "2";
 export const INDEX_DIRNAME = ".marian-knows";
 export const INDEX_FILENAME = "index.db";
 export const LOCK_FILENAME = "index.lock";
@@ -199,10 +200,12 @@ function sync(db: Database.Database, files: ScannedFile[], warnings: string[], f
         dropSections(docId);
         updateDoc.run(...meta, docId);
       }
-      const ftsTags = parsed.tags.join(" ");
+      // FTS columns are folded (see fold.ts); docs and sections keep the original text.
+      const ftsTitle = fold(parsed.title);
+      const ftsTags = fold(parsed.tags.join(" "));
       for (const s of parsed.sections) {
         const sectionId = insertSection.run(docId, s.ord, s.anchor, s.heading, s.body).lastInsertRowid;
-        insertFts.run(sectionId, parsed.title, s.heading, ftsTags, s.body);
+        insertFts.run(sectionId, ftsTitle, s.heading === null ? null : fold(s.heading), ftsTags, fold(s.body));
       }
     };
 

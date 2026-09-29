@@ -6,7 +6,8 @@ export {
   loadConfig,
   validateProjectName,
 } from "./config.js";
-export { ConfigError, IndexLockedError } from "./errors.js";
+export { ConfigError, IndexLockedError, IndexMissingError } from "./errors.js";
+export { fold } from "./fold.js";
 export { initConfig } from "./init.js";
 export {
   INDEX_DIRNAME,
@@ -28,6 +29,19 @@ export {
   slugify,
 } from "./parse.js";
 export { MAX_FILE_BYTES, scanSource } from "./scan.js";
+export {
+  DEFAULT_LIMIT,
+  FALLBACK_THRESHOLD,
+  RANK_WEIGHTS,
+  SNIPPET_CHARS,
+  SNIPPET_CONTEXT,
+  STOP_WORDS,
+  TRIM_ABOVE,
+  TRIM_CHARS,
+  prepareQuery,
+  search,
+} from "./search.js";
 export type { IndexOptions } from "./indexer.js";
+export type { PreparedQuery, SearchHit, SearchOptions } from "./search.js";
 export type { IndexResult, LoadedConfig, ParsedDoc, ScanResult, ScannedFile, Section } from "./types.js";
 export { validateVirtualPath } from "./virtual-path.js";

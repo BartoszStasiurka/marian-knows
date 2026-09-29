@@ -58,12 +58,12 @@ Pure functions, no DB.
 - [x] `schema_version` mismatch triggers a full rebuild
 - [x] `index --full`
 
-## 5. Search
+## 5. Search (done)
 
-- [ ] Basic FTS5 query over sections, `bm25` with weights (title 10, tags 5, heading 5, body 1)
-- [ ] Group by file: rank by best section, return its anchor
-- [ ] Strip FTS5 special characters from the query
-- [ ] Fold `ł`/`Ł` to `l`/`L`. The `unicode61 remove_diacritics 2` tokenizer strips only letters with a Unicode
+- [x] Basic FTS5 query over sections, `bm25` with weights (title 10, tags 5, heading 5, body 1)
+- [x] Group by file: rank by best section, return its anchor
+- [x] Strip FTS5 special characters from the query
+- [x] Fold `ł`/`Ł` to `l`/`L`. The `unicode61 remove_diacritics 2` tokenizer strips only letters with a Unicode
   decomposition (ą ć ę ń ó ś ź ż), and `ł` has none, so `zolw` does not find `żółw` (only `zołw` does).
   - Fold the FTS columns (`title`, `heading`, `tags`, `body`) at index time and the query at search time;
     `docs` and `sections` keep the original text.
@@ -71,16 +71,16 @@ Pure functions, no DB.
     column and copy the markers onto `sections.body` at the same offsets, then trim to a snippet in code.
   - Bump `schema_version` (the stage 4 mismatch check rebuilds existing indexes).
   - Tests: `zolw` finds `żółw`, `lodz` finds `Łódź`, the snippet shows the original `ł`.
-- [ ] Stop words (built-in PL/EN list); keep all if only stop words remain
-- [ ] Prefix inflection: words > 5 chars lose 2 last letters, all matched as prefix
-- [ ] AND mode by default
-- [ ] OR fallback when < 3 results and > 1 meaningful word; strict results first
-- [ ] `--exact`: no trimming, no prefix, no fallback
-- [ ] `--tag` filter
-- [ ] Snippets with `[...]` highlights, `--snippets`
-- [ ] `-n <limit>`
-- [ ] `search` command: one path per line, exit 1 on no results
-- [ ] Missing index: `Brak indeksu. Uruchom: marian-knows index`, exit 2
+- [x] Stop words (built-in PL/EN list); keep all if only stop words remain
+- [x] Prefix inflection: words > 5 chars lose 2 last letters, all matched as prefix
+- [x] AND mode by default
+- [x] OR fallback when < 3 results and > 1 meaningful word; strict results first
+- [x] `--exact`: no trimming, no prefix, no fallback
+- [x] `--tag` filter
+- [x] Snippets with `[...]` highlights, `--snippets`
+- [x] `-n <limit>`
+- [x] `search` command: one path per line, exit 1 on no results (default limit 10; `--json` stays a stub until stage 6)
+- [x] Missing index: `Brak indeksu. Uruchom: marian-knows index`, exit 2
 
 ## 6. Scope and inspection
 

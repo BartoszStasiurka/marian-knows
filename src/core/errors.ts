@@ -19,3 +19,11 @@ export class IndexLockedError extends Error {
     this.pid = pid;
   }
 }
+
+/** No index next to the config, or one from another schema version: `index` has to run first. */
+export class IndexMissingError extends Error {
+  constructor() {
+    super("Brak indeksu. Uruchom: marian-knows index");
+    this.name = "IndexMissingError";
+  }
+}

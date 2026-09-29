@@ -103,7 +103,8 @@ CREATE VIRTUAL TABLE sections_fts USING fts5(         -- rowid = sections.id
 - Snippety z treści sekcji, dopasowania w `[...]`.
 - Wiele słów łączonych przez AND (tryb ścisły). **Fallback:** gdy wyników jest mniej niż 3, a zapytanie ma więcej niż jedno znaczące słowo, dołączane są wyniki trybu OR, ścisłe wyżej.
 - **Stop-słowa:** stała lista PL/EN w kodzie jest usuwana z zapytania; jeśli zostałyby same stop-słowa, nic nie jest usuwane.
-- Polska fleksja prefiksem, bez stemmera: słowa dłuższe niż 5 znaków skracane o 2 ostatnie litery i dopasowywane jako prefiks (`konfiguracja` znajdzie „konfigurację", „konfiguracji"); krótsze dopasowywane jako prefiks bez skracania. Znaki specjalne FTS5 są usuwane. `--exact` wyłącza skracanie, prefiksy i fallback do OR.
+- Polska fleksja prefiksem, bez stemmera: słowa dłuższe niż 5 znaków skracane o 2 ostatnie litery i dopasowywane jako prefiks (`konfiguracja` znajdzie „konfigurację", „konfiguracji"); krótsze dopasowywane jako prefiks bez skracania. Znaki specjalne FTS5 są usuwane. Litery `ł`/`Ł` są sprowadzane do `l`/`L` w kolumnach FTS i w zapytaniu (tokenizer nie usuwa z nich diakrytyku), więc `zolw` znajdzie „żółw”; `docs`, `sections` i snippety zachowują oryginalny tekst.
+- `-n <limit>`: domyślnie 10 plików. `--tag <tag>`: pliki z tym tagiem, bez rozróżniania wielkości liter; filtr działa przed fallbackiem i limitem. `--exact` wyłącza skracanie, prefiksy i fallback do OR.
 - **Zestaw testowy jakości:** plik z zapytaniami i oczekiwanymi trafieniami, mierzący trafność w top 5; uruchamiany w testach, służy do strojenia wag, progu fallbacku i stop-słów.
 
 **Zakres ścieżek**
@@ -140,7 +141,7 @@ Opcja globalna: `--config <plik>` (dla `init`: plik, który ma zostać utworzony
 
 **`parse <file>`:** diagnostyka parsera, nie wymaga konfiguracji. Domyślnie wypisuje tytuł, tagi, frontmatter i listę sekcji z podglądem treści; `--json` wypisuje jeden obiekt `{title, tags, frontmatter, sections}`. Ostrzeżenia idą na stderr; nieczytelny plik to kod 2.
 
-**Komendy jeszcze niezaimplementowane:** `search`, `list`, `get`, `status` i `destroy` są rozpoznawane przez CLI, przyjmują dowolne opcje, nie mają efektów ubocznych, zwracają kod 0 i wypisują `TODO: implementacja` na stderr. Także z `--json` nie udają jeszcze docelowego kontraktu JSON.
+**Komendy jeszcze niezaimplementowane:** `list`, `get`, `status` i `destroy` oraz `search --json` są rozpoznawane przez CLI, przyjmują dowolne opcje, nie mają efektów ubocznych, zwracają kod 0 i wypisują `TODO: implementacja` na stderr. Także z `--json` nie udają jeszcze docelowego kontraktu JSON.
 
 Domyślne wyjście: jeden plik na linię, ścieżka wirtualna.
 

@@ -74,14 +74,15 @@ describe("rebuildIndex", () => {
     ).toEqual([{ anchor: "backup", title: "Deploy", tags: "ops server" }]);
   });
 
-  it("matches without diacritics, except ł (no Unicode decomposition)", async () => {
+  it("matches without diacritics; ł is folded at index time (no Unicode decomposition)", async () => {
     const { config } = project({ "a.md": "# Zwierzęta\n\nŻółw i źrebię." });
     await rebuildIndex(config);
     const count = (q: string) =>
       query(indexPath(config), "SELECT rowid FROM sections_fts WHERE sections_fts MATCH ?", q).length;
     expect(count("zrebie")).toBe(1);
-    expect(count("zołw")).toBe(1);
-    expect(count("zolw")).toBe(0);
+    expect(count("zolw")).toBe(1);
+    // Raw FTS does not fold the query; search() does.
+    expect(count("zołw")).toBe(0);
   });
 
   it("counts added, changed and removed against the previous index", async () => {

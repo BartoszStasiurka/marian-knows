@@ -230,6 +230,83 @@ describe.concurrent("index", () => {
   });
 });
 
+describe.concurrent("search", () => {
+  const PAD = "Lorem ipsum dolor sit amet consectetur. ".repeat(6);
+
+  async function project(): Promise<string> {
+    const dir = makeTree({
+      "marian-knows.yml": "name: P\n",
+      "server/deploy.md": `---\ntitle: Deploy\ntags: [ops]\n---\n${PAD}\n\n## Harmonogram\n\n${PAD}codzienny backup bazy o 03:00. ${PAD}\n`,
+      "notes.md": `# Notatki\n\nOpis konfiguracji i backup. ${PAD}\n`,
+    });
+    expect((await runCli(["index"], { cwd: dir })).code).toBe(0);
+    return dir;
+  }
+
+  it("prints one virtual path per line in rank order", async () => {
+    const dir = await project();
+    const r = await runCli(["search", "backup"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout.split("\n").filter(Boolean).sort()).toEqual(["/notes.md", "/server/deploy.md"]);
+    expect(r.stderr).toBe("");
+  });
+
+  it("joins several positionals into one query; -n, --tag, --exact", async () => {
+    const dir = await project();
+    const run = (...args: string[]) => runCli(["search", ...args], { cwd: dir });
+    const [multi, limited, tagged, prefix, exact] = await Promise.all([
+      run("codzienny", "backup"),
+      run("backup", "-n", "1"),
+      run("backup", "--tag", "ops"),
+      run("konfiguracja"),
+      run("konfiguracja", "--exact"),
+    ]);
+    // One strict hit, so OR results follow it.
+    expect(multi.stdout).toBe("/server/deploy.md\n/notes.md\n");
+    expect(limited.stdout.split("\n")).toHaveLength(2);
+    expect(tagged.stdout).toBe("/server/deploy.md\n");
+    expect(prefix.stdout).toBe("/notes.md\n");
+    expect(exact.code).toBe(1);
+  });
+
+  it("--snippets prints the snippet indented under the path", async () => {
+    const dir = await project();
+    const r = await runCli(["search", "codzienny", "--snippets"], { cwd: dir });
+    expect(r.code).toBe(0);
+    const [p, snippet] = r.stdout.split("\n");
+    expect(p).toBe("/server/deploy.md");
+    expect(snippet).toMatch(/^  ….*\[codzienny\] backup bazy o 03:00\..*…$/);
+  });
+
+  it("exits 1 with empty output on no results", async () => {
+    const dir = await project();
+    const r = await runCli(["search", "nieistniejące"], { cwd: dir });
+    expect(r).toMatchObject({ code: 1, stdout: "", stderr: "" });
+  });
+
+  it("missing index: message and exit 2", async () => {
+    const dir = makeTree({ "marian-knows.yml": "name: P\n", "a.md": "a" });
+    const r = await runCli(["search", "a"], { cwd: dir });
+    expect(r).toMatchObject({ code: 2, stdout: "", stderr: "Brak indeksu. Uruchom: marian-knows index\n" });
+    expect(snapshot(dir)).toEqual({ "marian-knows.yml": "name: P\n", "a.md": "a" });
+  });
+
+  it("usage errors exit 2", async () => {
+    const dir = await project();
+    const [missing, negative, ...bad] = await Promise.all([
+      runCli(["search"], { cwd: dir }),
+      runCli(["search", "backup", "-n", "-1"], { cwd: dir }),
+      ...["0", "x", "1.5"].map((n) => runCli(["search", "backup", "-n", n], { cwd: dir })),
+    ]);
+    expect(missing.code).toBe(2);
+    expect(negative.code).toBe(2);
+    for (const r of bad) {
+      expect(r.code).toBe(2);
+      expect(r.stderr).toMatch(/-n expects a positive integer/);
+    }
+  });
+});
+
 describe.concurrent("stub commands", () => {
   it.each([
     ["search", "backup", "-n", "5", "--json"],
