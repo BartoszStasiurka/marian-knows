@@ -112,7 +112,7 @@ CREATE VIRTUAL TABLE sections_fts USING fts5(         -- rowid = sections.id
 - `--path` można powtarzać (OR); `--exclude-path` wyklucza poddrzewa lub pliki.
 - Filtr działa przed rankingiem i limitem (`-n` dotyczy wyników z zakresu), łączy się z innymi filtrami (`--tag`) przez AND.
 - Zakres jest wyłącznie parametrem zapytania (nie ma go w konfiguracji, nie ma `--depth`) i dotyczy ścieżek wirtualnych.
-- Składnia ścieżki wirtualnej: zaczyna się od `/`, separator `/`, Unicode NFC; zabronione puste segmenty (`//`), segmenty `.` i `..`, `\`, znaki sterujące, białe znaki na brzegach segmentu; maks. 512 znaków. Niepoprawna ścieżka to błąd (kod 2). Poprawna, ale bez plików w indeksie: brak wyników (kod 1 w `search`) i ostrzeżenie na stderr.
+- Składnia ścieżki wirtualnej: zaczyna się od `/`, separator `/`, Unicode NFC; zabronione puste segmenty (`//`), segmenty `.` i `..`, `\`, znaki sterujące, białe znaki na brzegach segmentu; maks. 512 znaków. Niepoprawna ścieżka to błąd (kod 2). Poprawna, ale bez plików w indeksie: brak wyników (kod 1) i ostrzeżenie na stderr (np. `no indexed files under /nope/`).
 
 ## 6. Interfejs CLI
 
@@ -123,9 +123,9 @@ marian-knows parse <file> [--json]    # parsowanie pliku wskazanego ścieżką d
 marian-knows index [--full]           # (re)indeksowanie
 marian-knows search <query> [opcje]   # pliki wg rankingu
 marian-knows list [opcje]             # pliki z indeksu, posortowane po ścieżce
-marian-knows get <path>               # zawartość pliku (ścieżka wirtualna)
+marian-knows get <path>               # zawartość pliku z indeksu (ścieżka wirtualna)
 marian-knows status [--json]          # stan projektu: konfiguracja, liczba plików i sekcji, rozmiar, czas i wiek indeksu
-marian-knows destroy                  # usuwa projekt i wszystkie jego dane
+marian-knows destroy                  # usuwa indeks (katalog .marian-knows/); konfiguracja zostaje
 marian-knows help                     # pomoc (także --help)
 ```
 
@@ -141,7 +141,13 @@ Opcja globalna: `--config <plik>` (dla `init`: plik, który ma zostać utworzony
 
 **`parse <file>`:** diagnostyka parsera, nie wymaga konfiguracji. Domyślnie wypisuje tytuł, tagi, frontmatter i listę sekcji z podglądem treści; `--json` wypisuje jeden obiekt `{title, tags, frontmatter, sections}`. Ostrzeżenia idą na stderr; nieczytelny plik to kod 2.
 
-**Komendy jeszcze niezaimplementowane:** `list`, `get`, `status` i `destroy` oraz `search --json` są rozpoznawane przez CLI, przyjmują dowolne opcje, nie mają efektów ubocznych, zwracają kod 0 i wypisują `TODO: implementacja` na stderr. Także z `--json` nie udają jeszcze docelowego kontraktu JSON.
+**`get <path>`:** wypisuje plik bez zmian (bajty z dysku, bez normalizacji). Obsługuje wyłącznie pliki obecne w indeksie, więc nie odczyta niczego, czego nie pokazuje `list` (plików wykluczonych, ukrytych, spoza `.md`). Ścieżka z końcowym `/`, ścieżka spoza indeksu i plik usunięty po indeksowaniu to błąd (kod 2).
+
+**`status`:** nazwa projektu, ścieżka pliku konfiguracji i katalogu źródłowego (diagnostycznie), `exclude`, stan indeksu (`ok`, `missing`, `outdated`), liczba plików i sekcji, rozmiar bazy (`index.db` z `-wal` i `-shm`), czas i wiek indeksowania. Brak indeksu nie jest błędem (kod 0).
+
+**`destroy`:** usuwa katalog `.marian-knows/`. Pliki `.md` i `marian-knows.yml` zostają. Odmawia (kod 2), gdy trwa `index`. Brak indeksu to kod 0 i komunikat `No index to remove`.
+
+**Język komunikatów:** wszystkie komunikaty CLI (pomoc, podsumowania, ostrzeżenia `! warning:`, błędy `error:`) są po angielsku.
 
 Domyślne wyjście: jeden plik na linię, ścieżka wirtualna.
 
@@ -157,25 +163,26 @@ $ marian-knows search backup --json -n 1
 [{"path":"/server/deploy.md","title":"Deploy","tags":["ops"],"score":-8.41,"anchor":"harmonogram","snippet":"…[backup] bazy…"}]
 
 $ marian-knows index
-Plików .md: 42
-+ 42 nowych, ~ 0 zmienionych, - 0 usuniętych (0.4 s)
-! ostrzeżenie: pominięto /notes/x.md: nazwa różni się tylko wielkością liter od /Notes/x.md
+Files: 42
++ 42 added, ~ 0 changed, - 0 removed (0.4 s)
+! warning: skipped /notes/x.md: name differs only by case from /Notes/x.md
 ```
 
-- **Kontrakt `--json`** (stabilny, korzysta z niego m.in. przyszły MCP): goła tablica obiektów, po jednym na plik, w kolejności rankingu (`list`: po ścieżce). Bez koperty i `schemaVersion` w v1.
+- **Kontrakt `--json`** (stabilny, korzysta z niego m.in. przyszły MCP): `search` i `list` wypisują gołą tablicę obiektów, po jednym na plik, w kolejności rankingu (`list`: po ścieżce). Bez koperty i `schemaVersion` w v1.
 - `search`: `path`, `title`, `tags` (tablica), `score`, `anchor` (najlepsza sekcja pliku), `snippet` (wypełniony tylko z `--snippets`). `list`: `path`, `title`, `tags`. Pola nie są pomijane: brak wartości to `null` (`tags`: `[]`).
+- `status --json`: jeden obiekt `{name, config, path, pathExists, exclude, index, files, sections, dbSize, indexedAt, ageSeconds}`; `index` to `ok`, `missing` albo `outdated`, pozostałe pola indeksu są `null`, gdy indeks nie jest `ok` (`dbSize` także przy `outdated`).
 - `score` to `bm25` (niższa wartość = lepiej), porównywalny tylko w obrębie jednego zapytania.
 - Zmiany dodające pola są zgodne wstecz; usunięcie pola lub zmiana jego znaczenia wymaga podniesienia wersji głównej `marian-knows`.
-- W trybie `--json` stdout zawiera wyłącznie JSON, ostrzeżenia i błędy idą na stderr; brak wyników to `[]` i kod 1.
-- `get` zamienia ścieżkę wirtualną na dyskową względem `path` i może odczytać wyłącznie plik wewnątrz skonfigurowanego katalogu źródłowego.
+- W trybie `--json` stdout zawiera wyłącznie JSON, ostrzeżenia i błędy idą na stderr; brak wyników w `search` i `list` to `[]` i kod 1.
+- `get` zamienia ścieżkę wirtualną na dyskową względem `path` i może odczytać wyłącznie plik wewnątrz skonfigurowanego katalogu źródłowego, obecny w indeksie.
 
 | Kod | Znaczenie                                                                                |
 | --- | ---------------------------------------------------------------------------------------- |
 | 0   | OK                                                                                       |
-| 1   | brak wyników w `search` (jak `grep`)                                                     |
-| 2   | błąd: brak konfiguracji, zły YAML, błędna konfiguracja lub ścieżka zakresu, brak indeksu |
+| 1   | brak wyników w `search` i `list` (jak `grep`)                                            |
+| 2   | błąd: brak konfiguracji, zły YAML, błędna konfiguracja lub ścieżka, brak indeksu, zła składnia wywołania (nieznana opcja, nadmiarowy argument), trwający `index`, każdy nieoczekiwany wyjątek |
 
-Przy braku indeksu: `Brak indeksu. Uruchom: marian-knows index`.
+Przy braku indeksu: `No index. Run: marian-knows index`.
 
 ## 7. Architektura
 

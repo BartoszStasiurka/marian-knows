@@ -142,7 +142,7 @@ describe.concurrent("help and unknown commands", () => {
   it("rejects an unknown command with exit code 2", async () => {
     const r = await runCli(["reindex"], { cwd: makeTree() });
     expect(r.code).toBe(2);
-    expect(r.stderr).toContain("Unknown command: reindex");
+    expect(r.stderr).toContain("error: unknown command: reindex");
   });
 });
 
@@ -189,7 +189,7 @@ describe.concurrent("index", () => {
     mkdirSync(path.join(dir, "sub"));
     const r = await runCli(["index"], { cwd: path.join(dir, "sub") });
     expect(r.code).toBe(0);
-    expect(r.stdout).toMatch(/^Plików \.md: 2\n\+ 2 nowych, ~ 0 zmienionych, - 0 usuniętych \(\d+\.\d s\)\n$/);
+    expect(r.stdout).toMatch(/^Files: 2\n\+ 2 added, ~ 0 changed, - 0 removed \(\d+\.\d s\)\n$/);
     expect(r.stderr).toBe("");
     expect(readdirSync(path.join(dir, ".marian-knows"))).toContain("index.db");
   });
@@ -201,7 +201,7 @@ describe.concurrent("index", () => {
     writeFileSync(path.join(dir, "c.md"), "c");
     const r = await runCli(["index"], { cwd: dir });
     expect(r.code).toBe(0);
-    expect(r.stdout).toContain("+ 1 nowych, ~ 1 zmienionych, - 0 usuniętych");
+    expect(r.stdout).toContain("+ 1 added, ~ 1 changed, - 0 removed");
     expect(r.stderr).toMatch(/^! warning: \/a\.md: broken frontmatter/);
   });
 
@@ -210,7 +210,7 @@ describe.concurrent("index", () => {
     expect((await runCli(["index"], { cwd: dir })).code).toBe(0);
     const r = await runCli(["index", "--full"], { cwd: dir });
     expect(r.code).toBe(0);
-    expect(r.stdout).toContain("Plików .md: 1\n+ 0 nowych, ~ 0 zmienionych, - 0 usuniętych");
+    expect(r.stdout).toContain("Files: 1\n+ 0 added, ~ 0 changed, - 0 removed");
   });
 
   it("fails with exit 2 while another index run holds the lock", async () => {
@@ -287,7 +287,7 @@ describe.concurrent("search", () => {
   it("missing index: message and exit 2", async () => {
     const dir = makeTree({ "marian-knows.yml": "name: P\n", "a.md": "a" });
     const r = await runCli(["search", "a"], { cwd: dir });
-    expect(r).toMatchObject({ code: 2, stdout: "", stderr: "Brak indeksu. Uruchom: marian-knows index\n" });
+    expect(r).toMatchObject({ code: 2, stdout: "", stderr: "No index. Run: marian-knows index\n" });
     expect(snapshot(dir)).toEqual({ "marian-knows.yml": "name: P\n", "a.md": "a" });
   });
 
@@ -307,28 +307,227 @@ describe.concurrent("search", () => {
   });
 });
 
-describe.concurrent("stub commands", () => {
-  it.each([
-    ["search", "backup", "-n", "5", "--json"],
-    ["list", "--json"],
-    ["get", "/a.md"],
-    ["status"],
-    ["status", "--json"],
-    ["destroy"],
-    ["--config", "marian-knows.yml", "destroy"],
-  ].map((args) => ({ args })))("$args has no side effects and exits 0", async ({ args }) => {
-    const dir = makeTree({ "marian-knows.yml": "name: P\n", "a.md": "# A", ".marian-knows/index.db": "x" });
-    const before = snapshot(dir);
-    const r = await runCli(args, { cwd: dir });
+describe.concurrent("search --json and scope", () => {
+  const PAD = "Lorem ipsum dolor sit amet consectetur. ".repeat(6);
+
+  async function project(): Promise<string> {
+    const dir = makeTree({
+      "marian-knows.yml": "name: P\n",
+      "server/deploy.md": `---\ntitle: Deploy\ntags: [ops]\n---\n${PAD}\n\n## Harmonogram\n\n${PAD}codzienny backup bazy. ${PAD}\n`,
+      "server/draft/old.md": `# Old\n\nbackup. ${PAD}\n`,
+      "serverx/x.md": `# X\n\nbackup. ${PAD}\n`,
+      "notes.md": `# Notatki\n\nbackup. ${PAD}\n`,
+    });
+    expect((await runCli(["index"], { cwd: dir })).code).toBe(0);
+    return dir;
+  }
+
+  it("--json prints a bare array with every field, snippet null without --snippets", async () => {
+    const dir = await project();
+    const r = await runCli(["search", "codzienny", "--json"], { cwd: dir });
     expect(r.code).toBe(0);
-    expect(r.stdout).toBe("");
-    expect(r.stderr).toBe("TODO: implementacja\n");
-    expect(snapshot(dir)).toEqual(before);
+    expect(r.stderr).toBe("");
+    const hits = JSON.parse(r.stdout);
+    expect(hits).toEqual([
+      { path: "/server/deploy.md", title: "Deploy", tags: ["ops"], score: expect.any(Number), anchor: "harmonogram", snippet: null },
+    ]);
+    const withSnippet = JSON.parse((await runCli(["search", "codzienny", "--json", "--snippets"], { cwd: dir })).stdout);
+    expect(withSnippet[0].snippet).toContain("[codzienny]");
   });
 
-  it("works without any config", async () => {
-    const r = await runCli(["status"], { cwd: makeTree() });
+  it("--json with no results prints [] and exits 1", async () => {
+    const dir = await project();
+    expect(await runCli(["search", "nieistniejące", "--json"], { cwd: dir })).toMatchObject({ code: 1, stdout: "[]\n", stderr: "" });
+  });
+
+  it("--path and --exclude-path are repeatable", async () => {
+    const dir = await project();
+    const run = (...args: string[]) => runCli(["search", "backup", ...args], { cwd: dir });
+    const [sub, file, both] = await Promise.all([
+      run("--path", "/server/"),
+      run("--path", "/notes.md"),
+      run("--path", "/server/", "--path", "/notes.md", "--exclude-path", "/server/draft/"),
+    ]);
+    expect(sub.stdout.split("\n").filter(Boolean).sort()).toEqual(["/server/deploy.md", "/server/draft/old.md"]);
+    expect(file.stdout).toBe("/notes.md\n");
+    expect(both.stdout.split("\n").filter(Boolean).sort()).toEqual(["/notes.md", "/server/deploy.md"]);
+  });
+
+  it("valid scope without files: warning on stderr, exit 1; --json keeps stdout clean", async () => {
+    const dir = await project();
+    const r = await runCli(["search", "backup", "--path", "/nope/", "--json"], { cwd: dir });
+    expect(r).toMatchObject({ code: 1, stdout: "[]\n", stderr: "! warning: no indexed files under /nope/\n" });
+  });
+
+  it("invalid scope path: exit 2, nothing on stdout", async () => {
+    const dir = await project();
+    const [rel, dots] = await Promise.all([
+      runCli(["search", "backup", "--path", "server/"], { cwd: dir }),
+      runCli(["search", "backup", "--exclude-path", "/a/../b/"], { cwd: dir }),
+    ]);
+    expect(rel).toMatchObject({ code: 2, stdout: "" });
+    expect(rel.stderr).toBe("error: invalid path 'server/': must start with '/'\n");
+    expect(dots.code).toBe(2);
+    expect(dots.stderr).toContain("forbidden segment '..'");
+  });
+});
+
+describe.concurrent("list", () => {
+  async function project(): Promise<string> {
+    const dir = makeTree({
+      "marian-knows.yml": "name: P\n",
+      "b.md": "---\ntags: [ops]\n---\n# B\n",
+      "a/x.md": "# X",
+      "a/draft/y.md": "---\ntags: [Ops]\n---\ny",
+    });
+    expect((await runCli(["index"], { cwd: dir })).code).toBe(0);
+    return dir;
+  }
+
+  it("prints indexed files sorted by path", async () => {
+    const dir = await project();
+    expect(await runCli(["list"], { cwd: dir })).toMatchObject({ code: 0, stdout: "/a/draft/y.md\n/a/x.md\n/b.md\n", stderr: "" });
+  });
+
+  it("--json, --tag, --path, --exclude-path", async () => {
+    const dir = await project();
+    const r = await runCli(["list", "--json", "--tag", "ops", "--path", "/a/", "--path", "/b.md"], { cwd: dir });
     expect(r.code).toBe(0);
-    expect(r.stderr).toBe("TODO: implementacja\n");
+    expect(JSON.parse(r.stdout)).toEqual([
+      { path: "/a/draft/y.md", title: "y", tags: ["Ops"] },
+      { path: "/b.md", title: "B", tags: ["ops"] },
+    ]);
+    const excluded = await runCli(["list", "--exclude-path", "/a/draft/"], { cwd: dir });
+    expect(excluded.stdout).toBe("/a/x.md\n/b.md\n");
+  });
+
+  it("no files: exit 1 ([] with --json); scope warning on stderr", async () => {
+    const dir = await project();
+    const [tag, scope] = await Promise.all([
+      runCli(["list", "--tag", "nope"], { cwd: dir }),
+      runCli(["list", "--json", "--path", "/c.md"], { cwd: dir }),
+    ]);
+    expect(tag).toMatchObject({ code: 1, stdout: "", stderr: "" });
+    expect(scope).toMatchObject({ code: 1, stdout: "[]\n", stderr: "! warning: not in the index: /c.md\n" });
+  });
+
+  it("missing index or invalid path: exit 2", async () => {
+    const dir = makeTree({ "marian-knows.yml": "name: P\n", "a.md": "a" });
+    expect(await runCli(["list"], { cwd: dir })).toMatchObject({ code: 2, stderr: "No index. Run: marian-knows index\n" });
+    expect((await runCli(["list", "--path", "/a//"], { cwd: dir })).code).toBe(2);
+  });
+});
+
+describe.concurrent("get", () => {
+  it("prints the file content as on disk", async () => {
+    const content = "# Deploy\r\n\r\nKrok 1.\r\n";
+    const dir = makeTree({ "marian-knows.yml": "name: P\npath: ./docs\n", "docs/server/deploy.md": content });
+    expect((await runCli(["index"], { cwd: dir })).code).toBe(0);
+    expect(await runCli(["get", "/server/deploy.md"], { cwd: dir })).toMatchObject({ code: 0, stdout: content, stderr: "" });
+  });
+
+  it("exit 2: invalid path, directory, not indexed, outside the source directory, missing argument", async () => {
+    const dir = makeTree({ "marian-knows.yml": "name: P\npath: ./docs\n", "docs/a.md": "a", "secret.md": "s" });
+    expect((await runCli(["index"], { cwd: dir })).code).toBe(0);
+    const cases = await Promise.all(
+      [["/../secret.md"], ["a.md"], ["/docs/"], ["/secret.md"], ["/marian-knows.yml"], []].map((a) =>
+        runCli(["get", ...a], { cwd: dir }),
+      ),
+    );
+    for (const r of cases) expect(r).toMatchObject({ code: 2, stdout: "" });
+    expect(cases[0]!.stderr).toContain("forbidden segment '..'");
+    expect(cases[2]!.stderr).toContain("must be a file path, not a directory");
+    expect(cases[3]!.stderr).toBe("error: not in the index: /secret.md\n");
+  });
+});
+
+describe.concurrent("status", () => {
+  it("shows config and a missing index, exit 0", async () => {
+    const dir = makeTree({ "marian-knows.yml": "name: Baza\n" });
+    const r = await runCli(["status"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toBe(
+      `Project: Baza\nConfig: ${path.join(dir, "marian-knows.yml")}\nSource: ${dir}\nExclude: -\n` +
+        "Index: none (run: marian-knows index)\n",
+    );
+  });
+
+  it("shows counts, size and index age; --json has every field", async () => {
+    const dir = makeTree({ "marian-knows.yml": "name: Baza\nexclude: draft/**\n", "a.md": "# A", "b.md": "b" });
+    expect((await runCli(["index"], { cwd: dir })).code).toBe(0);
+    const text = await runCli(["status"], { cwd: dir });
+    expect(text.stdout).toMatch(/\nIndex: 2 files, 1 sections, [\d.]+ (B|KB|MB)\nIndexed at: \S+ \(\d+ s ago\)\n$/);
+    const json = JSON.parse((await runCli(["status", "--json"], { cwd: dir })).stdout);
+    expect(json).toEqual({
+      name: "Baza",
+      config: path.join(dir, "marian-knows.yml"),
+      path: dir,
+      pathExists: true,
+      exclude: ["draft/**"],
+      index: "ok",
+      files: 2,
+      sections: 1, // "# A" is a title only
+      dbSize: expect.any(Number),
+      indexedAt: expect.any(String),
+      ageSeconds: expect.any(Number),
+    });
+  });
+
+  it("--json with a missing index: nulls", async () => {
+    const r = await runCli(["status", "--json"], { cwd: makeTree({ "marian-knows.yml": "name: P\n" }) });
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout)).toMatchObject({ index: "missing", files: null, sections: null, dbSize: null, indexedAt: null });
+  });
+
+  it("without a config: exit 2", async () => {
+    const r = await runCli(["status"], { cwd: makeTree() });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/^error: config not found/);
+  });
+});
+
+describe.concurrent("destroy", () => {
+  it("removes .marian-knows/ only; a second run has nothing to remove", async () => {
+    const dir = makeTree({ "marian-knows.yml": "name: P\n", "a.md": "# A" });
+    expect((await runCli(["index"], { cwd: dir })).code).toBe(0);
+    const r = await runCli(["destroy"], { cwd: dir });
+    expect(r).toMatchObject({ code: 0, stdout: "Removed the index (.marian-knows/)\n", stderr: "" });
+    expect(snapshot(dir)).toEqual({ "marian-knows.yml": "name: P\n", "a.md": "# A" });
+    expect(await runCli(["destroy"], { cwd: dir })).toMatchObject({ code: 0, stdout: "No index to remove\n" });
+  });
+
+  it("refuses while index is running: exit 2, nothing removed", async () => {
+    const dir = makeTree({ "marian-knows.yml": "name: P\n", ".marian-knows/index.lock": String(process.pid) });
+    const r = await runCli(["destroy"], { cwd: dir });
+    expect(r).toMatchObject({ code: 2, stderr: `error: index is already running (pid ${process.pid})\n` });
+    expect(snapshot(dir)).toEqual({ "marian-knows.yml": "name: P\n", [path.join(".marian-knows", "index.lock")]: String(process.pid) });
+  });
+});
+
+describe.concurrent("exit codes", () => {
+  it.each([
+    [["status", "extra"], "error: unexpected argument 'extra' for status"],
+    [["init", "Baza", "wiedzy"], "error: unexpected argument 'wiedzy' for init"],
+    [["list", "--bogus"], "error: Unknown option '--bogus'"],
+    [["search", "x", "--path"], "error: Option '--path <value>' argument missing"],
+  ].map(([args, stderr]) => ({ args: args as string[], stderr: stderr as string })))(
+    "$args exits 2",
+    async ({ args, stderr }) => {
+      const dir = makeTree({ "marian-knows.yml": "name: P\n" });
+      const r = await runCli(args, { cwd: dir });
+      expect(r.code).toBe(2);
+      expect(r.stdout).toBe("");
+      expect(r.stderr).toContain(stderr);
+    },
+  );
+
+  it("a broken index database is exit 2, not a crash with exit 1", async () => {
+    const dir = makeTree({ "marian-knows.yml": "name: P\n", ".marian-knows/index.db": "not a database" });
+    for (const args of [["search", "a"], ["list"], ["get", "/a.md"]]) {
+      expect((await runCli(args, { cwd: dir })).code).toBe(2);
+    }
+    const status = await runCli(["status", "--json"], { cwd: dir });
+    expect(status.code).toBe(0);
+    expect(JSON.parse(status.stdout).index).toBe("outdated");
   });
 });

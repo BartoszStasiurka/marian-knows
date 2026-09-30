@@ -3,6 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   IndexMissingError,
+  InvalidPathError,
   indexPath,
   loadConfig,
   prepareQuery,
@@ -19,7 +20,7 @@ async function indexed(files: Record<string, string>) {
   const dir = makeTree({ ...files, "marian-knows.yml": "name: T\n" });
   const config = loadConfig(path.join(dir, "marian-knows.yml"));
   await rebuildIndex(config);
-  return { dir, config, find: (q: string, o?: SearchOptions) => search(config, q, o) };
+  return { dir, config, find: (q: string, o?: SearchOptions) => search(config, q, o).hits };
 }
 
 const paths = (hits: { path: string }[]) => hits.map((h) => h.path);
@@ -176,6 +177,34 @@ describe("search", () => {
     expect(find("backup", { snippets: true })[0]!.snippet).toBe("Krótki [backup].");
   });
 
+  it("--path scope applies before the fallback and the limit, ANDed with --tag", async () => {
+    const { find } = await indexed({
+      "srv/a.md": `---\ntags: [ops]\n---\n# A\n\nbackup monitoring. ${PAD}\n`,
+      "srv/b.md": `---\ntags: [dev]\n---\n# B\n\nbackup. ${PAD}\n`,
+      "srv/draft/c.md": `# C\n\nbackup backup backup. ${PAD}\n`,
+      "srvx/d.md": `# D\n\nbackup monitoring backup. ${PAD}\n`,
+      "e.md": `# E\n\nbackup monitoring. ${PAD}\n`,
+    });
+    expect(paths(find("backup", { paths: ["/srv/"] })).sort()).toEqual(["/srv/a.md", "/srv/b.md", "/srv/draft/c.md"]);
+    expect(paths(find("backup", { paths: ["/srv/"], excludePaths: ["/srv/draft/"], tag: "ops" }))).toEqual(["/srv/a.md"]);
+    expect(paths(find("backup", { paths: ["/e.md", "/srvx/"], limit: 1 }))).toHaveLength(1);
+    // Strict hits outside the scope do not count: one strict hit in scope, so OR results follow.
+    expect(paths(find("backup monitoring", { paths: ["/srv/"], excludePaths: ["/srv/draft/"] }))).toEqual([
+      "/srv/a.md",
+      "/srv/b.md",
+    ]);
+  });
+
+  it("a valid scope without files gives no hits and a warning; an invalid one throws", async () => {
+    const { config } = await indexed({ "a.md": `# A\n\nbackup. ${PAD}\n` });
+    expect(search(config, "backup", { paths: ["/nope/"] })).toEqual({
+      hits: [],
+      warnings: ["no indexed files under /nope/"],
+    });
+    expect(search(config, "?!", { paths: ["/nope/"] }).warnings).toHaveLength(1);
+    expect(() => search(config, "backup", { excludePaths: ["/a/./b/"] })).toThrow(InvalidPathError);
+  });
+
   it("missing or outdated index is IndexMissingError", async () => {
     const dir = makeTree({ "marian-knows.yml": "name: T\n", "a.md": "a" });
     const config = loadConfig(path.join(dir, "marian-knows.yml"));
@@ -186,6 +215,6 @@ describe("search", () => {
     const db = new Database(indexPath(config));
     db.prepare("UPDATE meta SET value = 'old' WHERE key = 'schema_version'").run();
     db.close();
-    expect(() => search(config, "a")).toThrow("Brak indeksu. Uruchom: marian-knows index");
+    expect(() => search(config, "a")).toThrow("No index. Run: marian-knows index");
   });
 });

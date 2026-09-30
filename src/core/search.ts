@@ -1,8 +1,6 @@
-import Database from "better-sqlite3";
-import { existsSync } from "node:fs";
-import { IndexMissingError } from "./errors.js";
+import { hasTag, inScope, scopeWarnings, validateScope, type DocFilterOptions } from "./filter.js";
 import { fold } from "./fold.js";
-import { SCHEMA_VERSION, indexPath } from "./indexer.js";
+import { openIndexReadonly } from "./indexer.js";
 import type { LoadedConfig } from "./types.js";
 
 /** bm25 weights in `sections_fts` column order: title, heading, tags, body. */
@@ -59,13 +57,11 @@ export function prepareQuery(query: string, options: { exact?: boolean } = {}): 
   return { words, and: terms.join(" "), or: terms.join(" OR ") };
 }
 
-export interface SearchOptions {
+export interface SearchOptions extends DocFilterOptions {
   /** Max number of files; default `DEFAULT_LIMIT`. */
   limit?: number;
   /** No trimming, no prefix, no OR fallback. */
   exact?: boolean;
-  /** Only files with this tag (case-insensitive). */
-  tag?: string;
   /** Fill `snippet` from the best section. */
   snippets?: boolean;
 }
@@ -82,6 +78,13 @@ export interface SearchHit {
   snippet: string | null;
 }
 
+export interface SearchResult {
+  /** Ranked files, at most `limit`. */
+  hits: SearchHit[];
+  /** A valid scope that covers no indexed file. */
+  warnings: string[];
+}
+
 interface Row {
   path: string;
   title: string | null;
@@ -96,41 +99,23 @@ interface Row {
 const OPEN = "";
 const CLOSE = "";
 
-/** Opens the index read-only. Missing file or another schema version = IndexMissingError. */
-function openForSearch(config: LoadedConfig): Database.Database {
-  const file = indexPath(config);
-  if (!existsSync(file)) throw new IndexMissingError();
-  const db = new Database(file, { readonly: true, fileMustExist: true });
-  let version: string | undefined;
-  try {
-    version = (db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get() as { value: string } | undefined)
-      ?.value;
-  } catch {
-    // No meta table: not an index we can read.
-  }
-  if (version !== SCHEMA_VERSION) {
-    db.close();
-    throw new IndexMissingError();
-  }
-  return db;
-}
-
 /**
  * Searches the index. Sections are ranked by weighted bm25; each file is ranked by its best section,
  * whose anchor it returns. Strict AND first; when that yields fewer than `FALLBACK_THRESHOLD` files and
  * the query has more than one meaningful word, OR results are appended below the strict ones.
+ * Scope (`paths`, `excludePaths`) and `tag` filter files before the fallback check and the limit.
  */
-export function search(config: LoadedConfig, query: string, options: SearchOptions = {}): SearchHit[] {
+export function search(config: LoadedConfig, query: string, options: SearchOptions = {}): SearchResult {
+  validateScope(options);
   const q = prepareQuery(query, options);
   const limit = options.limit ?? DEFAULT_LIMIT;
-  if (!q.and || limit <= 0) {
-    // Still report a missing index before claiming "no results".
-    openForSearch(config).close();
-    return [];
-  }
 
-  const db = openForSearch(config);
+  // Opened before the query check, so a missing index is reported before "no results".
+  const db = openIndexReadonly(config);
   try {
+    const warnings = scopeWarnings(db, options);
+    if (!q.and || limit <= 0) return { hits: [], warnings };
+
     const stmt = db.prepare(`
       SELECT d.path, d.title, d.tags, s.anchor, s.body,
              bm25(sections_fts, ${RANK_WEIGHTS.join(", ")}) AS score,
@@ -141,10 +126,10 @@ export function search(config: LoadedConfig, query: string, options: SearchOptio
       WHERE sections_fts MATCH ?
       ORDER BY score, d.path, s.ord
     `);
-    const tag = options.tag?.normalize("NFC").trim().toLowerCase();
+    // Scope and tag go before the fallback check and the limit.
     const run = (match: string) =>
       bestPerFile(stmt.all(match) as Row[]).filter(
-        (r) => tag === undefined || (JSON.parse(r.tags) as string[]).some((t) => t.toLowerCase() === tag),
+        (r) => inScope(r.path, options) && hasTag(JSON.parse(r.tags) as string[], options.tag),
       );
 
     let rows = run(q.and);
@@ -153,7 +138,7 @@ export function search(config: LoadedConfig, query: string, options: SearchOptio
       rows = rows.concat(run(q.or!).filter((r) => !strict.has(r.path)));
     }
 
-    return rows.slice(0, limit).map((r) => ({
+    const hits = rows.slice(0, limit).map((r) => ({
       path: r.path,
       title: r.title,
       tags: JSON.parse(r.tags) as string[],
@@ -161,6 +146,7 @@ export function search(config: LoadedConfig, query: string, options: SearchOptio
       anchor: r.anchor,
       snippet: options.snippets ? makeSnippet(unfoldMarks(r.marked ?? r.body, r.body)) : null,
     }));
+    return { hits, warnings };
   } finally {
     db.close();
   }

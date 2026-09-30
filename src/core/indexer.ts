@@ -1,8 +1,8 @@
 import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
-import { closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, unlinkSync, writeSync } from "node:fs";
 import path from "node:path";
-import { IndexLockedError } from "./errors.js";
+import { IndexLockedError, IndexMissingError } from "./errors.js";
 import { fold } from "./fold.js";
 import { decodeMarkdown, parseMarkdown } from "./parse.js";
 import { scanSource } from "./scan.js";
@@ -39,9 +39,48 @@ DROP TABLE IF EXISTS docs;
 DROP TABLE IF EXISTS meta;
 `;
 
+/** Disk path of the index directory: `.marian-knows/` next to the config file. */
+export function indexDir(config: LoadedConfig): string {
+  return path.join(config.configDir, INDEX_DIRNAME);
+}
+
 /** Disk path of the index database for a config: `.marian-knows/index.db` next to the config file. */
 export function indexPath(config: LoadedConfig): string {
-  return path.join(config.configDir, INDEX_DIRNAME, INDEX_FILENAME);
+  return path.join(indexDir(config), INDEX_FILENAME);
+}
+
+/**
+ * Opens an existing index read-only (works while `index` runs, thanks to WAL).
+ * Missing file = IndexMissingError; another schema version = IndexMissingError with `outdated`.
+ */
+export function openIndexReadonly(config: LoadedConfig): Database.Database {
+  const file = indexPath(config);
+  if (!existsSync(file)) throw new IndexMissingError();
+  const db = new Database(file, { readonly: true, fileMustExist: true });
+  let version: string | undefined;
+  try {
+    version = readMeta(db, "schema_version");
+  } catch {
+    // No meta table or not a database at all: not an index we can read.
+  }
+  if (version !== SCHEMA_VERSION) {
+    db.close();
+    throw new IndexMissingError(true);
+  }
+  return db;
+}
+
+/**
+ * Removes the `.marian-knows/` directory (database, WAL files, lock). Refuses while a live `index` run
+ * holds the lock. Returns false when there was nothing to remove. The config file stays.
+ */
+export function destroyIndex(config: LoadedConfig): boolean {
+  const dir = indexDir(config);
+  if (!existsSync(dir)) return false;
+  // Taken, never released: the lock file goes away with the directory.
+  acquireIndexLock(config);
+  rmSync(dir, { recursive: true, force: true });
+  return true;
 }
 
 /** Opens (and creates, if needed) the index database in WAL mode with the schema in place. */
@@ -70,7 +109,7 @@ function isAlive(pid: number): boolean {
  * Throws IndexLockedError when a live process holds it. Returns the release function.
  */
 export function acquireIndexLock(config: LoadedConfig): () => void {
-  const file = path.join(config.configDir, INDEX_DIRNAME, LOCK_FILENAME);
+  const file = path.join(indexDir(config), LOCK_FILENAME);
   mkdirSync(path.dirname(file), { recursive: true });
   for (let attempt = 0; ; attempt++) {
     try {
@@ -106,7 +145,7 @@ interface IndexedDoc {
 
 const sha256 = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
-function readMeta(db: Database.Database, key: string): string | undefined {
+export function readMeta(db: Database.Database, key: string): string | undefined {
   return (db.prepare("SELECT value FROM meta WHERE key = ?").get(key) as { value: string } | undefined)?.value;
 }
 

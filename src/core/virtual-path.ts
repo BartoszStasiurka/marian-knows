@@ -4,7 +4,7 @@ export const MAX_VIRTUAL_PATH_LENGTH = 512;
 export const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/;
 
 /**
- * Validates virtual path syntax (later: --path scopes and `get`).
+ * Validates virtual path syntax (`--path` / `--exclude-path` scopes and `get`).
  * Returns a list of problems; empty list means valid.
  * A trailing '/' means a directory; that distinction is up to the caller.
  */

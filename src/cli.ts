@@ -3,17 +3,22 @@ import { parseArgs } from "node:util";
 import {
   CONFIG_FILENAME,
   ConfigError,
-  IndexLockedError,
   IndexMissingError,
+  destroyIndex,
   findConfig,
+  getDoc,
   initConfig,
+  list as listIndex,
   loadConfig,
   parseFile,
   scanSource,
   search as searchIndex,
+  status as projectStatus,
   syncIndex,
+  type DocFilterOptions,
   type LoadedConfig,
   type ParsedDoc,
+  type ProjectStatus,
 } from "./core/index.js";
 
 const USAGE = `Usage: marian-knows <command> [options]
@@ -24,24 +29,24 @@ Commands:
   parse <file>          Parse a Markdown file given by disk path (diagnostic, no config needed)
   index [--full]        Sync the index (.marian-knows/index.db next to the config)
   search <query>        Search the index, one virtual path per line (exit 1: no results)
+  list                  List indexed files sorted by path (exit 1: no files)
+  get <path>            Print an indexed file by virtual path
+  status                Show project, config and index state
+  destroy               Remove the index (.marian-knows/); the config stays
   help                  Show this help
 
-Not implemented yet:
-  list                  List indexed files
-  get <path>            Print a file by virtual path
-  status                Show project, config and index state
-  destroy               Remove the project and all its data
-
 Options:
-  --config <file>   Path to marian-knows.yml (for init: the file to create)
-  --json            JSON output (scan, parse)
-  --disk            Include disk paths (scan; diagnostic only)
-  --full            Rebuild the index from scratch (index)
-  -n <limit>        Max number of files (search; default 10)
-  --exact           No word trimming, no prefix match, no OR fallback (search)
-  --tag <tag>       Only files with this tag (search)
-  --snippets        Print a snippet under each path, matches in [...] (search)
-  -h, --help        Show this help`;
+  --config <file>          Path to marian-knows.yml (for init: the file to create)
+  --json                   JSON output (scan, parse, search, list, status)
+  --disk                   Include disk paths (scan; diagnostic only)
+  --full                   Rebuild the index from scratch (index)
+  -n <limit>               Max number of files (search; default 10)
+  --exact                  No word trimming, no prefix match, no OR fallback (search)
+  --tag <tag>              Only files with this tag (search, list)
+  --path <prefix>          Only this subtree ('/dir/') or file ('/a.md'); repeatable (search, list)
+  --exclude-path <prefix>  Leave out a subtree or file; repeatable (search, list)
+  --snippets               Print a snippet under each path, matches in [...] (search)
+  -h, --help               Show this help`;
 
 const OPTIONS = {
   config: { type: "string" },
@@ -51,18 +56,24 @@ const OPTIONS = {
   limit: { type: "string", short: "n" },
   exact: { type: "boolean" },
   tag: { type: "string" },
+  path: { type: "string", multiple: true },
+  "exclude-path": { type: "string", multiple: true },
   snippets: { type: "boolean" },
   help: { type: "boolean", short: "h" },
 } as const;
 
-/** Recognised but not implemented: no side effects, exit 0. */
-const STUBS = new Set(["list", "get", "status", "destroy"]);
+/** Positional arguments each command takes after its name (search: any number of query words). */
+const ARITY: Record<string, number> = { init: 1, scan: 0, parse: 1, index: 0, list: 0, get: 1, status: 0, destroy: 0 };
+
+const warn = (warnings: string[]) => {
+  for (const w of warnings) console.error(`! warning: ${w}`);
+};
 
 /** Finds and loads the config; prints an error and returns null when there is none. */
 function requireConfig(explicit: string | undefined): LoadedConfig | null {
   const configPath = findConfig({ explicit });
   if (!configPath) {
-    console.error("Config not found. Use --config, MARIAN_KNOWS_CONFIG or run: marian-knows init <project_name>");
+    console.error("error: config not found. Use --config, MARIAN_KNOWS_CONFIG or run: marian-knows init <project_name>");
     return null;
   }
   return loadConfig(configPath);
@@ -72,8 +83,7 @@ async function scan(values: { config?: string; json?: boolean; disk?: boolean })
   const config = requireConfig(values.config);
   if (!config) return 2;
   const { files, warnings } = await scanSource(config);
-
-  for (const w of warnings) console.error(`! warning: ${w}`);
+  warn(warnings);
 
   if (values.json) {
     console.log(
@@ -92,19 +102,31 @@ async function index(values: { config?: string; full?: boolean }): Promise<numbe
   const started = performance.now();
   const r = await syncIndex(config, { full: values.full });
   const seconds = ((performance.now() - started) / 1000).toFixed(1);
-  console.log(`Plików .md: ${r.files}`);
-  console.log(`+ ${r.added} nowych, ~ ${r.changed} zmienionych, - ${r.removed} usuniętych (${seconds} s)`);
-  for (const w of r.warnings) console.error(`! warning: ${w}`);
+  console.log(`Files: ${r.files}`);
+  console.log(`+ ${r.added} added, ~ ${r.changed} changed, - ${r.removed} removed (${seconds} s)`);
+  warn(r.warnings);
   return 0;
 }
 
+interface FilterValues {
+  tag?: string;
+  path?: string[];
+  "exclude-path"?: string[];
+}
+
+const filterOptions = (values: FilterValues): DocFilterOptions => ({
+  tag: values.tag,
+  paths: values.path,
+  excludePaths: values["exclude-path"],
+});
+
 async function search(
   words: string[],
-  values: { config?: string; limit?: string; exact?: boolean; tag?: string; snippets?: boolean },
+  values: FilterValues & { config?: string; limit?: string; exact?: boolean; snippets?: boolean; json?: boolean },
 ): Promise<number> {
   const query = words.join(" ");
   if (!query.trim()) {
-    console.error("Missing <query>. Usage: marian-knows search <query> [options]");
+    console.error("error: missing <query>. Usage: marian-knows search <query> [options]");
     return 2;
   }
   let limit: number | undefined;
@@ -117,12 +139,90 @@ async function search(
   }
   const config = requireConfig(values.config);
   if (!config) return 2;
-  const hits = searchIndex(config, query, { limit, exact: values.exact, tag: values.tag, snippets: values.snippets });
-  for (const h of hits) {
-    console.log(h.path);
-    if (h.snippet) console.log(`  ${h.snippet}`);
+  const { hits, warnings } = searchIndex(config, query, {
+    ...filterOptions(values),
+    limit,
+    exact: values.exact,
+    snippets: values.snippets,
+  });
+  warn(warnings);
+  if (values.json) {
+    console.log(JSON.stringify(hits));
+  } else {
+    for (const h of hits) {
+      console.log(h.path);
+      if (h.snippet) console.log(`  ${h.snippet}`);
+    }
   }
   return hits.length ? 0 : 1;
+}
+
+function list(values: FilterValues & { config?: string; json?: boolean }): number {
+  const config = requireConfig(values.config);
+  if (!config) return 2;
+  const { docs, warnings } = listIndex(config, filterOptions(values));
+  warn(warnings);
+  if (values.json) console.log(JSON.stringify(docs));
+  else for (const d of docs) console.log(d.path);
+  return docs.length ? 0 : 1;
+}
+
+function get(virtualPath: string | undefined, values: { config?: string }): number {
+  if (virtualPath === undefined) {
+    console.error("error: missing <path>. Usage: marian-knows get <path>");
+    return 2;
+  }
+  const config = requireConfig(values.config);
+  if (!config) return 2;
+  process.stdout.write(getDoc(config, virtualPath).content);
+  return 0;
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatAge(seconds: number): string {
+  if (seconds < 60) return `${seconds} s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} min`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} h`;
+  return `${Math.floor(seconds / 86400)} d`;
+}
+
+function printStatus(s: ProjectStatus): void {
+  console.log(`Project: ${s.name}`);
+  console.log(`Config: ${s.config}`);
+  console.log(`Source: ${s.path}${s.pathExists ? "" : " (missing)"}`);
+  console.log(`Exclude: ${s.exclude.length ? s.exclude.join(", ") : "-"}`);
+  if (s.index === "missing") {
+    console.log("Index: none (run: marian-knows index)");
+    return;
+  }
+  if (s.index === "outdated") {
+    console.log("Index: outdated schema (run: marian-knows index)");
+    return;
+  }
+  console.log(`Index: ${s.files} files, ${s.sections} sections, ${formatBytes(s.dbSize ?? 0)}`);
+  const age = s.ageSeconds === null ? "" : ` (${formatAge(s.ageSeconds)} ago)`;
+  console.log(`Indexed at: ${s.indexedAt ?? "-"}${age}`);
+}
+
+function status(values: { config?: string; json?: boolean }): number {
+  const config = requireConfig(values.config);
+  if (!config) return 2;
+  const s = projectStatus(config);
+  if (values.json) console.log(JSON.stringify(s));
+  else printStatus(s);
+  return 0;
+}
+
+function destroy(values: { config?: string }): number {
+  const config = requireConfig(values.config);
+  if (!config) return 2;
+  console.log(destroyIndex(config) ? "Removed the index (.marian-knows/)" : "No index to remove");
+  return 0;
 }
 
 const PREVIEW_CHARS = 80;
@@ -146,7 +246,7 @@ function printParsed(doc: ParsedDoc): void {
 
 function parse(file: string | undefined, values: { json?: boolean }): number {
   if (file === undefined) {
-    console.error("Missing <file>. Usage: marian-knows parse <file> [--json]");
+    console.error("error: missing <file>. Usage: marian-knows parse <file> [--json]");
     return 2;
   }
   let doc: ParsedDoc;
@@ -156,7 +256,7 @@ function parse(file: string | undefined, values: { json?: boolean }): number {
     console.error(`error: cannot read ${file}: ${(e as NodeJS.ErrnoException).code ?? (e as Error).message}`);
     return 2;
   }
-  for (const w of doc.warnings) console.error(`! warning: ${w}`);
+  warn(doc.warnings);
   if (values.json) {
     const { warnings: _, ...rest } = doc;
     console.log(JSON.stringify(rest));
@@ -168,7 +268,7 @@ function parse(file: string | undefined, values: { json?: boolean }): number {
 
 function init(name: string | undefined, values: { config?: string }): number {
   if (name === undefined) {
-    console.error("Missing <project_name>. Usage: marian-knows init <project_name>");
+    console.error("error: missing <project_name>. Usage: marian-knows init <project_name>");
     return 2;
   }
   const written = initConfig(values.config ?? CONFIG_FILENAME, name);
@@ -177,24 +277,11 @@ function init(name: string | undefined, values: { config?: string }): number {
 }
 
 async function main(argv: string[]): Promise<number> {
-  // Stubs accept any options (e.g. `search -n 5`), so detect them before strict parsing.
-  const [loose] = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true, strict: false }).positionals;
-  // The search --json contract comes with stage 6; until then it does not pretend to have one.
-  const jsonSearch = loose === "search" && argv.includes("--json");
-  if (loose !== undefined && (STUBS.has(loose) || jsonSearch)) {
-    console.error("TODO: implementacja");
-    return 0;
-  }
-
   let parsed;
   try {
-    parsed = parseArgs({
-      args: argv,
-      options: OPTIONS,
-      allowPositionals: true,
-    });
+    parsed = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true });
   } catch (e) {
-    console.error((e as Error).message);
+    console.error(`error: ${(e as Error).message}`);
     return 2;
   }
 
@@ -204,6 +291,12 @@ async function main(argv: string[]): Promise<number> {
   if (values.help || command === "help" || !command) {
     console.log(USAGE);
     return command || values.help ? 0 : 2;
+  }
+
+  const arity = ARITY[command];
+  if (arity !== undefined && args.length > arity) {
+    console.error(`error: unexpected argument '${args[arity]}' for ${command}`);
+    return 2;
   }
 
   try {
@@ -218,8 +311,16 @@ async function main(argv: string[]): Promise<number> {
         return await index(values);
       case "search":
         return await search(args, values);
+      case "list":
+        return list(values);
+      case "get":
+        return get(args[0], values);
+      case "status":
+        return status(values);
+      case "destroy":
+        return destroy(values);
       default:
-        console.error(`Unknown command: ${command}\n\n${USAGE}`);
+        console.error(`error: unknown command: ${command}\n\n${USAGE}`);
         return 2;
     }
   } catch (e) {
@@ -227,15 +328,14 @@ async function main(argv: string[]): Promise<number> {
       for (const err of e.errors) console.error(`error: ${err}`);
       return 2;
     }
-    if (e instanceof IndexLockedError) {
-      console.error(`error: ${e.message}`);
-      return 2;
-    }
     if (e instanceof IndexMissingError) {
       console.error(e.message);
       return 2;
     }
-    throw e;
+    // IndexLockedError, InvalidPathError, DocNotFoundError and anything unexpected: exit 2, never 1
+    // (that means "no results").
+    console.error(`error: ${e instanceof Error ? e.message : String(e)}`);
+    return 2;
   }
 }
 

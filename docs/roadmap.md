@@ -82,24 +82,23 @@ Pure functions, no DB.
 - [x] `search` command: one path per line, exit 1 on no results (default limit 10; `--json` stays a stub until stage 6)
 - [x] Missing index: `Brak indeksu. Uruchom: marian-knows index`, exit 2
 
-## 6. Scope and inspection
+## 6. Scope and inspection (done)
 
 - [x] Virtual path syntax validator in core (`validateVirtualPath`)
-- [ ] Use it for `--path` / `--exclude-path` / `get`, exit 2 on invalid
-- [ ] `--path` prefix filter: trailing `/` = directory, otherwise single file
-- [ ] Repeatable `--path` (OR), `--exclude-path`
-- [ ] Scope applied before ranking and limit, AND with `--tag`
-- [ ] Valid scope with no files: warning on stderr, no results
-- [ ] `list` with `--tag`, `--path`, `--exclude-path`, sorted by path
-- [ ] `get <path>`: resolve to disk only inside the source dir
-- [ ] `status` (config, file and section counts, DB size, index time and age)
-- [ ] `destroy` (the `.marian-knows/` directory)
-- [ ] `--json` contract for `search`, `list`, `status` (bare array, `null` / `[]` for missing)
-- [ ] `--json`: stdout JSON only, warnings on stderr, `[]` + exit 1 on no results
-- [ ] Exit codes audit across all commands
-- [ ] One language for CLI messages. Now mixed: the `index` summary is Polish (spec example), while
-  warnings (`! warning:`), errors and help are English and the spec shows `! ostrzeżenie:`. Pick one
-  for all commands, align `docs/requirements.md` and the tests.
+- [x] Use it for `--path` / `--exclude-path` / `get`, exit 2 on invalid
+- [x] `--path` prefix filter: trailing `/` = directory, otherwise single file
+- [x] Repeatable `--path` (OR), `--exclude-path`
+- [x] Scope applied before ranking and limit, AND with `--tag`
+- [x] Valid scope with no files: warning on stderr, no results
+- [x] `list` with `--tag`, `--path`, `--exclude-path`, sorted by path
+- [x] `get <path>`: resolve to disk only inside the source dir
+- [x] `status` (config, file and section counts, DB size, index time and age)
+- [x] `destroy` (the `.marian-knows/` directory)
+- [x] `--json` contract for `search`, `list`, `status` (bare array, `null` / `[]` for missing)
+- [x] `--json`: stdout JSON only, warnings on stderr, `[]` + exit 1 on no results
+- [x] Exit codes audit across all commands
+- [x] One language for CLI messages: English everywhere (help, `index` summary, `! warning:`, `error:`,
+  missing index); `docs/requirements.md` and the tests aligned.
 
 ## 7. Quality set
 
