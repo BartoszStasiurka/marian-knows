@@ -100,12 +100,14 @@ Pure functions, no DB.
 - [x] One language for CLI messages: English everywhere (help, `index` summary, `! warning:`, `error:`,
   missing index); `docs/requirements.md` and the tests aligned.
 
-## 7. Quality set
+## 7. Quality set (done)
 
-- [ ] Fixture knowledge base for quality tests
-- [ ] Queries file with expected hits
-- [ ] Top-5 hit-rate metric running in `npm test`
-- [ ] Tune weights, fallback threshold, stop words, section size limits
+- [x] Fixture knowledge base for quality tests
+- [x] Queries file with expected hits
+- [x] Top-5 hit-rate metric running in `npm test`
+- [x] Tune weights, fallback threshold, stop words, section size limits
+  - Only word trimming moved the numbers: trim 2 letters but keep at least 4 (5-letter words now trimmed too).
+    hit@5 96.8% → 100%, MRR 0.922 → 0.946. Other parameters changed at most one query; kept as they were.
 
 ## 8. Polish
 

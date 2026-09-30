@@ -103,9 +103,9 @@ CREATE VIRTUAL TABLE sections_fts USING fts5(         -- rowid = sections.id
 - Snippety z treści sekcji, dopasowania w `[...]`.
 - Wiele słów łączonych przez AND (tryb ścisły). **Fallback:** gdy wyników jest mniej niż 3, a zapytanie ma więcej niż jedno znaczące słowo, dołączane są wyniki trybu OR, ścisłe wyżej.
 - **Stop-słowa:** stała lista PL/EN w kodzie jest usuwana z zapytania; jeśli zostałyby same stop-słowa, nic nie jest usuwane.
-- Polska fleksja prefiksem, bez stemmera: słowa dłuższe niż 5 znaków skracane o 2 ostatnie litery i dopasowywane jako prefiks (`konfiguracja` znajdzie „konfigurację", „konfiguracji"); krótsze dopasowywane jako prefiks bez skracania. Znaki specjalne FTS5 są usuwane. Litery `ł`/`Ł` są sprowadzane do `l`/`L` w kolumnach FTS i w zapytaniu (tokenizer nie usuwa z nich diakrytyku), więc `zolw` znajdzie „żółw”; `docs`, `sections` i snippety zachowują oryginalny tekst.
+- Polska fleksja prefiksem, bez stemmera: słowa dłuższe niż 4 znaki skracane o 2 ostatnie litery, ale nie krócej niż do 4 znaków, i dopasowywane jako prefiks (`konfiguracja` znajdzie „konfigurację", „konfiguracji"; `biura` → `biur*` znajdzie „biuro"); słowa do 4 znaków dopasowywane jako prefiks bez skracania. Znaki specjalne FTS5 są usuwane. Litery `ł`/`Ł` są sprowadzane do `l`/`L` w kolumnach FTS i w zapytaniu (tokenizer nie usuwa z nich diakrytyku), więc `zolw` znajdzie „żółw”; `docs`, `sections` i snippety zachowują oryginalny tekst.
 - `-n <limit>`: domyślnie 10 plików. `--tag <tag>`: pliki z tym tagiem, bez rozróżniania wielkości liter; filtr działa przed fallbackiem i limitem. `--exact` wyłącza skracanie, prefiksy i fallback do OR.
-- **Zestaw testowy jakości:** plik z zapytaniami i oczekiwanymi trafieniami, mierzący trafność w top 5; uruchamiany w testach, służy do strojenia wag, progu fallbacku i stop-słów.
+- **Zestaw testowy jakości:** baza fixture (`test/fixtures/quality/kb/`) i plik z zapytaniami i oczekiwanymi trafieniami (`test/fixtures/quality/queries.yml`), mierzący trafność w top 5 (hit@5) i MRR; uruchamiany w `npm test` z progami regresji, służy do strojenia wag, progu fallbacku, stop-słów, skracania słów i rozmiarów sekcji. Szybki raport bez vitest: `npx tsx test/quality.ts`.
 
 **Zakres ścieżek**
 - `--path <prefiks>` (w `search` i `list`): poddrzewo ścieżek wirtualnych na dowolnej głębokości. Prefiks z końcowym `/` obejmuje katalog (`/projekt/A/` nie obejmuje `/projekt/AB/`); bez końcowego `/` oznacza pojedynczy plik.
@@ -204,3 +204,6 @@ Wartości startowe, bez decyzji z góry; do dostrojenia na zestawie testowym jak
 - Wagi rankingu: tytuł 10, tagi 5, nagłówek sekcji 5, treść 1.
 - Próg fallbacku AND → OR: mniej niż 3 wyniki.
 - Stop-słowa: wbudowana lista PL/EN.
+- Skracanie słów: o 2 litery, minimum 4 znaki.
+
+Pierwsze strojenie (62 zapytania, 28 plików): wagi (od 1/1/1/1 do 20/10/10/1), próg fallbacku (2–10), stop-słowa i rozmiary sekcji zmieniały wynik najwyżej o jedno zapytanie, więc zostały bez zmian. Skracanie było jedyną realną dźwignią: dawna reguła (tylko słowa > 5 znaków) nie łapała odmian 5-literowych słów (`biura`/„biuro”, `hasło`/„hasła”, `marcu`/„marca”); nowa podniosła hit@5 z 96,8% do 100% i MRR z 0,922 do 0,946.

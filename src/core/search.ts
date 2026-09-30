@@ -8,9 +8,9 @@ export const RANK_WEIGHTS = [10, 5, 5, 1] as const;
 /** Strict (AND) results below this count trigger the OR fallback. */
 export const FALLBACK_THRESHOLD = 3;
 export const DEFAULT_LIMIT = 10;
-/** Words longer than this lose `TRIM_CHARS` letters before prefix matching. */
-export const TRIM_ABOVE = 5;
+/** Words lose up to `TRIM_CHARS` last letters before prefix matching, but keep at least `MIN_STEM`. */
 export const TRIM_CHARS = 2;
+export const MIN_STEM = 4;
 
 /** Built-in PL/EN stop words, compared after lower-casing, NFC and `ł` folding. */
 export const STOP_WORDS: ReadonlySet<string> = new Set(
@@ -37,8 +37,8 @@ export interface PreparedQuery {
 
 /**
  * Turns user input into FTS5 expressions. Everything but letters and digits is a separator, so FTS5
- * syntax never reaches MATCH; each term is quoted. Without `exact`, words longer than `TRIM_ABOVE`
- * lose `TRIM_CHARS` letters and every term is a prefix match (cheap Polish inflection).
+ * syntax never reaches MATCH; each term is quoted. Without `exact`, words lose up to `TRIM_CHARS`
+ * letters (keeping at least `MIN_STEM`) and every term is a prefix match (cheap Polish inflection).
  */
 export function prepareQuery(query: string, options: { exact?: boolean } = {}): PreparedQuery {
   const all = fold(query.normalize("NFC").toLowerCase())
@@ -51,7 +51,7 @@ export function prepareQuery(query: string, options: { exact?: boolean } = {}): 
   const terms = words.map((w) => {
     if (options.exact) return `"${w}"`;
     const chars = [...w];
-    const stem = chars.length > TRIM_ABOVE ? chars.slice(0, -TRIM_CHARS).join("") : w;
+    const stem = chars.length > MIN_STEM ? chars.slice(0, Math.max(MIN_STEM, chars.length - TRIM_CHARS)).join("") : w;
     return `"${stem}"*`;
   });
   return { words, and: terms.join(" "), or: terms.join(" OR ") };

@@ -43,11 +43,11 @@ export { MAX_FILE_BYTES, scanSource } from "./scan.js";
 export {
   DEFAULT_LIMIT,
   FALLBACK_THRESHOLD,
+  MIN_STEM,
   RANK_WEIGHTS,
   SNIPPET_CHARS,
   SNIPPET_CONTEXT,
   STOP_WORDS,
-  TRIM_ABOVE,
   TRIM_CHARS,
   prepareQuery,
   search,

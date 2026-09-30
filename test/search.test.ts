@@ -26,12 +26,16 @@ async function indexed(files: Record<string, string>) {
 const paths = (hits: { path: string }[]) => hits.map((h) => h.path);
 
 describe("prepareQuery", () => {
-  it("trims words longer than 5 chars by 2 and matches every term as a prefix", () => {
+  it("trims words by 2 chars, keeping at least 4, and matches every term as a prefix", () => {
     expect(prepareQuery("konfiguracja serwer api")).toMatchObject({
       words: ["konfiguracja", "serwer", "api"],
       and: `"konfigurac"* "serw"* "api"*`,
       or: `"konfigurac"* OR "serw"* OR "api"*`,
     });
+  });
+
+  it("5-char words keep 4 chars, shorter words stay whole", () => {
+    expect(prepareQuery("biura hasło baza api").and).toBe(`"biur"* "hasl"* "baza"* "api"*`);
   });
 
   it("strips FTS5 syntax: quotes, stars, parentheses, column filters, NEAR", () => {

@@ -1,0 +1,150 @@
+# Quality set: queries with expected hits against ./kb.
+# A query is a hit when any path in `expect` is among the top 5 results.
+# Optional `tag` and `exact` are passed to search as-is.
+# Write queries the way a person would type them, not by copying words from the target page.
+
+# Backup and restore
+- query: jak zrobić backup bazy
+  expect: /ops/backup-postgres.md
+- query: pg_dump
+  expect: /ops/backup-postgres.md
+- query: przywrócenie bazy z kopii zapasowej
+  expect: [/ops/backup-postgres.md, /ops/restore-drill.md]
+- query: jak długo trzymamy kopie
+  expect: /ops/backup-postgres.md
+- query: test odtwarzania backupu
+  expect: /ops/restore-drill.md
+- query: RTO
+  expect: /ops/restore-drill.md
+
+# Web, TLS, monitoring
+- query: konfiguracja nginx
+  expect: /ops/nginx-reverse-proxy.md
+- query: 502 bad gateway
+  expect: /ops/nginx-reverse-proxy.md
+- query: odnowienie certyfikatu
+  expect: /ops/certificates.md
+- query: certyfikat SSL wygasa
+  expect: /ops/certificates.md
+- query: dashboard grafana
+  expect: /ops/monitoring.md
+- query: kto ma dyżur
+  expect: /ops/monitoring.md
+- query: alert pagerduty
+  expect: /ops/monitoring.md
+
+# Incident
+- query: awaria bazy w marcu
+  expect: /ops/incident-2025-03-db-outage.md
+- query: no space left on device
+  expect: /ops/incident-2025-03-db-outage.md
+- query: slot replikacji
+  expect: /ops/incident-2025-03-db-outage.md
+
+# Access, deploy, local env
+- query: klucz ssh
+  expect: /ops/ssh-access.md
+- query: jak połączyć się z serwerem przez bastion
+  expect: /ops/ssh-access.md
+- query: kubernetes deploy
+  expect: /ops/kubernetes-deploy.md
+- query: rollback release
+  expect: /ops/kubernetes-deploy.md
+- query: where are secrets stored
+  expect: /ops/kubernetes-deploy.md
+- query: run the app locally with docker
+  expect: /ops/docker-compose-local.md
+- query: reset local database
+  expect: /ops/docker-compose-local.md
+
+# Development
+- query: branch naming
+  expect: /dev/git-workflow.md
+- query: squash merge
+  expect: /dev/git-workflow.md
+- query: jak pisać komentarze w review
+  expect: /dev/code-review.md
+- query: testy integracyjne
+  expect: /dev/testing-strategy.md
+- query: niestabilne testy e2e
+  expect: [/dev/testing-strategy.md, /meetings/2025-02-retro.md]
+- query: refresh token
+  expect: /dev/api-authentication.md
+- query: how long is the access token valid
+  expect: /dev/api-authentication.md
+- query: limit zapytań
+  expect: /dev/rate-limiting.md
+- query: 429 too many requests
+  expect: /dev/rate-limiting.md
+- query: dodanie kolumny bez przestoju
+  expect: /dev/database-migrations.md
+- query: migracje
+  expect: /dev/database-migrations.md
+- query: structured logs
+  expect: /dev/logging.md
+- query: jak wyłączyć funkcję na produkcji
+  expect: /dev/feature-flags.md
+
+# HR
+- query: wniosek urlopowy
+  expect: /hr/urlopy.md
+- query: urlop na żądanie
+  expect: /hr/urlopy.md
+- query: do kiedy wykorzystać zaległy urlop
+  expect: /hr/urlopy.md
+- query: pierwszy dzień w pracy
+  expect: /hr/onboarding.md
+- query: nowy pracownik laptop
+  expect: /hr/onboarding.md
+- query: rozliczenie delegacji
+  expect: /hr/delegacje.md
+- query: kilometrówka
+  expect: /hr/delegacje.md
+- query: multisport
+  expect: /hr/benefity.md
+- query: prywatna opieka medyczna
+  expect: /hr/benefity.md
+- query: budżet na szkolenia
+  expect: /hr/benefity.md
+- query: praca z domu
+  expect: /hr/praca-zdalna.md
+- query: praca z zagranicy
+  expect: /hr/praca-zdalna.md
+
+# Finance
+- query: wystawić fakturę klientowi
+  expect: /finance/faktury.md
+- query: KSeF
+  expect: /finance/faktury.md
+- query: termin płatności faktury
+  expect: /finance/faktury.md
+- query: zwrot za taksówkę
+  expect: [/finance/koszty.md, /hr/delegacje.md]
+- query: zgubiony paragon
+  expect: /finance/koszty.md
+
+# Meetings
+- query: cele na Q1
+  expect: /meetings/2025-01-planning.md
+- query: co poszło źle
+  expect: /meetings/2025-02-retro.md
+- query: deploy w piątek
+  expect: /meetings/2025-02-retro.md
+
+# Office
+- query: adres biura
+  expect: /office/biuro-lodz.md
+- query: biuro lodz
+  expect: /office/biuro-lodz.md
+- query: parking przy biurze
+  expect: /office/biuro-lodz.md
+- query: hasło do wifi
+  expect: /office/biuro-lodz.md
+
+# Filters
+- query: baza
+  tag: incident
+  expect: /ops/incident-2025-03-db-outage.md
+- query: token
+  exact: true
+  expect: /dev/api-authentication.md
