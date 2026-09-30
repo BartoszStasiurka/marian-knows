@@ -2,47 +2,169 @@
 
 Markdown knowledge base with full-text search (SQLite FTS5). CLI first, MCP later.
 
-The `.md` files are the source of truth; the SQLite index is a disposable derivative.
-Full requirements: [docs/requirements.md](docs/requirements.md) (Polish). Plan: [docs/roadmap.md](docs/roadmap.md).
+The `.md` files are the source of truth; the SQLite index is a disposable derivative you can delete and rebuild
+at any time. Full requirements: [docs/requirements.md](docs/requirements.md) (Polish). Plan: [docs/roadmap.md](docs/roadmap.md).
 
-## Status
+## Install
 
-Stage 1: config, source scanning and `init`. No index yet; `parse`, `index`, `search`, `list`, `get`,
-`status` and `destroy` are recognised but only print `TODO: implementacja`.
+Requires Node.js 20+. The package is not on the npm registry; install it from a checkout.
+
+```bash
+git clone <repo> marian-knows && cd marian-knows
+npm install
+npm run build
+npm link                 # puts `marian-knows` on PATH
+```
+
+Or build a tarball and install that anywhere:
+
+```bash
+npm pack                 # runs a clean build, writes marian-knows-<version>.tgz
+npm install -g ./marian-knows-0.1.0.tgz
+```
+
+`better-sqlite3` is a native module. It ships prebuilt binaries for common platforms; elsewhere its install
+script compiles it and needs a C++ toolchain. If your npm asks you to approve install scripts, approve
+`better-sqlite3`.
+
+## Quick start
+
+```bash
+cd ~/notes
+marian-knows init "My notes"     # creates ./marian-knows.yml (never overwrites)
+marian-knows index               # builds .marian-knows/index.db next to the config
+marian-knows search backup postgres --snippets
+marian-knows get /ops/backup.md
+```
+
+Add `.marian-knows/` to your `.gitignore`; `init` does not touch it.
 
 ## Config
 
 One `marian-knows.yml` describes one project with one source directory:
 
 ```yaml
-name: Customer knowledge base   # required
+name: Customer knowledge base   # required, 1-128 chars
 path: ./docs                    # optional, relative to this file; defaults to its directory
-exclude:                        # optional, globs relative to path
+exclude:                        # optional, a glob or a list of globs relative to path
   - "**/draft/**"
 ```
 
-Scanning is recursive and picks up `.md` files only. Hidden entries and `node_modules` are always skipped.
-A file's virtual path is its path relative to `path`: `docs/api/readme.md` becomes `/api/readme.md`.
+- Scanning is recursive and picks up `.md` files only.
+- Hidden files and directories and `node_modules` are always skipped.
+- Files over 1 MB and names containing `#` or `?` are skipped with a warning.
+- A missing `path` directory is a warning, not an error.
 
-## Usage
+Config lookup: `--config <file>`, then `MARIAN_KNOWS_CONFIG`, then `marian-knows.yml` searched upwards from the
+current directory. The index lives in `.marian-knows/index.db` next to the config.
+
+### Virtual paths
+
+Every file is addressed by its path relative to `path`, starting with `/`: with `path: ./docs`, the file
+`docs/api/readme.md` is `/api/readme.md`. Output and the index contain virtual paths only; disk paths appear only
+in diagnostics (`scan --disk`, `status`).
+
+## Commands
+
+| Command               | What it does                                                                      |
+| --------------------- | --------------------------------------------------------------------------------- |
+| `init <project_name>` | Create a minimal `marian-knows.yml`; `--config` picks the file to create          |
+| `scan`                | List files the index would contain, without indexing (`--json`, `--disk`)         |
+| `parse <file>`        | Show how a Markdown file (disk path) splits into sections; no config (`--json`)   |
+| `index`               | Sync the index incrementally; `--full` rebuilds from scratch                      |
+| `search <query>`      | Files ranked by relevance, one virtual path per line                              |
+| `list`                | Indexed files sorted by path                                                      |
+| `get <path>`          | Print an indexed file unchanged                                                   |
+| `status`              | Project, config and index state (`--json`)                                        |
+| `destroy`             | Remove `.marian-knows/`; the config and `.md` files stay                          |
+| `help`                | Show help (also `--help`, `-h`)                                                   |
+
+### Search
 
 ```bash
-npm install
-npm run dev -- init "My project"    # creates ./marian-knows.yml (never overwrites)
-npm run dev -- scan                 # virtual paths from ./marian-knows.yml
-npm run dev -- scan --disk          # virtual path <TAB> disk path (diagnostic)
-npm run dev -- scan --json
-npm run dev -- scan --config path/to/marian-knows.yml
-npm run dev -- help
+marian-knows search konfiguracja nginx          # all words must match
+marian-knows search backup -n 3 --snippets      # top 3, snippet with [matches] under each path
+marian-knows search deploy --tag ops --path /server/ --exclude-path /server/old/
+marian-knows search "pg_restore" --exact
 ```
 
-Config lookup: `--config`, then `MARIAN_KNOWS_CONFIG`, then `marian-knows.yml` searched upwards from the current directory.
-`init` writes to `--config` if given, otherwise `./marian-knows.yml`.
+- Words are joined with AND. With fewer than 3 results and more than one meaningful word, OR results are
+  appended below the strict ones.
+- Polish inflection without a stemmer: words longer than 4 letters lose their last 2 (keeping at least 4) and
+  match as a prefix, so `konfiguracja` finds "konfiguracji". Diacritics are ignored (`zolw` finds "żółw").
+- Common PL/EN stop words are dropped, unless the query is only stop words.
+- `--exact` turns off trimming, prefix matching and the OR fallback.
+- `-n <limit>` (default 10), `--tag <tag>` (case-insensitive).
+- `--path` and `--exclude-path` take virtual paths and are repeatable. A trailing `/` means a directory
+  (`/proj/A/` does not include `/proj/AB/`), otherwise a single file. `--path` values are OR-ed; all filters
+  apply before ranking and the limit.
+
+`list` takes the same `--tag`, `--path` and `--exclude-path` filters.
+
+## JSON output
+
+`search`, `list`, `status`, `scan` and `parse` accept `--json`. With `--json`, stdout carries JSON only;
+warnings and errors go to stderr.
+
+The `search`, `list` and `status` shapes are a stable contract. Adding fields is backwards compatible;
+removing a field or changing its meaning requires a major version bump.
+
+`search` and `list` print a bare array, one object per file, in rank order (`list`: by path). No results
+print `[]` with exit code 1. Fields are never omitted: a missing value is `null`, missing tags are `[]`.
+
+```bash
+$ marian-knows search backup --json -n 1 --snippets
+[{"path":"/server/deploy.md","title":"Deploy","tags":["ops"],"score":-8.41,"anchor":"harmonogram","snippet":"…[backup] bazy…"}]
+
+$ marian-knows list --json
+[{"path":"/server/deploy.md","title":"Deploy","tags":["ops"]}]
+```
+
+| Field     | `search` | `list` | Meaning                                                               |
+| --------- | :------: | :----: | --------------------------------------------------------------------- |
+| `path`    | ✓        | ✓      | Virtual path                                                          |
+| `title`   | ✓        | ✓      | Frontmatter `title`, else first H1, else file name                    |
+| `tags`    | ✓        | ✓      | Frontmatter `tags` as an array                                        |
+| `score`   | ✓        |        | `bm25`, lower is better; comparable only within one query             |
+| `anchor`  | ✓        |        | Anchor of the file's best-matching section, `null` for the file start |
+| `snippet` | ✓        |        | Snippet with `[...]` matches; `null` without `--snippets`             |
+
+`status --json` prints one object:
+
+```json
+{"name":"My notes","config":"/home/me/notes/marian-knows.yml","path":"/home/me/notes","pathExists":true,
+ "exclude":[],"index":"ok","files":42,"sections":310,"dbSize":1048576,
+ "indexedAt":"2026-01-01T10:00:00.000Z","ageSeconds":120}
+```
+
+`index` is `ok`, `missing` or `outdated`. When it is not `ok`, the index fields (`files`, `sections`,
+`indexedAt`, `ageSeconds`) are `null`; `dbSize` is also `null` for `missing`.
+
+## Exit codes
+
+| Code | Meaning                                                                                          |
+| ---- | ------------------------------------------------------------------------------------------------ |
+| 0    | OK                                                                                               |
+| 1    | No results from `search` or `list` (like `grep`)                                                 |
+| 2    | Error: missing or invalid config, invalid virtual path, missing index, bad arguments, `index` already running, unexpected failure |
+
+## Library
+
+The core logic is importable from Node:
+
+```js
+import { findConfig, loadConfig, syncIndex, search } from "marian-knows/core";
+```
+
+Only the `marian-knows/core` entry point is exported. Its API is not yet covered by the stability promise that
+applies to the JSON output.
 
 ## Development
 
 ```bash
-npm test          # vitest
+npm test                  # vitest, including the search quality set (hit@5, MRR)
 npm run typecheck
 npm run build
+npm run dev -- search x   # run the CLI from source
+npx tsx test/quality.ts   # quality report without vitest
 ```

@@ -109,10 +109,10 @@ Pure functions, no DB.
   - Only word trimming moved the numbers: trim 2 letters but keep at least 4 (5-letter words now trimmed too).
     hit@5 96.8% → 100%, MRR 0.922 → 0.946. Other parameters changed at most one query; kept as they were.
 
-## 8. Polish
+## 8. Polish (done)
 
-- [ ] `package.json`: `bin`, `exports` for `./core`, `files`
-- [ ] Build check: `npm pack` and run the packed CLI
-- [ ] README: install, config, commands, JSON contract
+- [x] `package.json`: `bin`, `exports` for `./core`, `files`; `prepack` does a clean build
+- [x] Build check: `npm pack` and run the packed CLI
+- [x] README: install, config, commands, JSON contract
 
 MCP is a separate later project.
