@@ -38,10 +38,15 @@ export interface CliResult {
   stderr: string;
 }
 
-/** Runs the CLI from source in a subprocess, with MARIAN_KNOWS_CONFIG removed from the env. */
-export function runCli(args: string[], opts: { cwd: string }): Promise<CliResult> {
+/**
+ * Runs the CLI from source in a subprocess, with MARIAN_KNOWS_CONFIG removed from the env.
+ * The query log is off unless `log` is set.
+ */
+export function runCli(args: string[], opts: { cwd: string; log?: boolean }): Promise<CliResult> {
   const env = { ...process.env };
   delete env.MARIAN_KNOWS_CONFIG;
+  if (opts.log) delete env.MARIAN_KNOWS_NO_LOG;
+  else env.MARIAN_KNOWS_NO_LOG = "1";
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ["--import", TSX, CLI, ...args], { cwd: opts.cwd, env });
     let stdout = "";

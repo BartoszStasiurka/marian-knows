@@ -74,6 +74,8 @@ export interface SearchHit {
   score: number;
   /** Anchor of the best section; null for text before the first heading. */
   anchor: string | null;
+  /** Heading of the best section; null for text before the first heading. */
+  heading: string | null;
   /** Best section's text around the first match, matches in `[...]`; null without `snippets`. */
   snippet: string | null;
 }
@@ -91,6 +93,7 @@ interface Row {
   tags: string;
   score: number;
   anchor: string | null;
+  heading: string | null;
   body: string;
   marked: string | null;
 }
@@ -117,7 +120,7 @@ export function search(config: LoadedConfig, query: string, options: SearchOptio
     if (!q.and || limit <= 0) return { hits: [], warnings };
 
     const stmt = db.prepare(`
-      SELECT d.path, d.title, d.tags, s.anchor, s.body,
+      SELECT d.path, d.title, d.tags, s.anchor, s.heading, s.body,
              bm25(sections_fts, ${RANK_WEIGHTS.join(", ")}) AS score,
              ${options.snippets ? `highlight(sections_fts, 3, '${OPEN}', '${CLOSE}')` : "NULL"} AS marked
       FROM sections_fts
@@ -144,6 +147,7 @@ export function search(config: LoadedConfig, query: string, options: SearchOptio
       tags: JSON.parse(r.tags) as string[],
       score: r.score,
       anchor: r.anchor,
+      heading: r.heading,
       snippet: options.snippets ? makeSnippet(unfoldMarks(r.marked ?? r.body, r.body)) : null,
     }));
     return { hits, warnings };

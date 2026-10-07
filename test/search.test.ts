@@ -72,8 +72,8 @@ describe("search", () => {
     });
     const hits = find("backup");
     expect(paths(hits)).toEqual(["/a.md", "/b.md"]);
-    expect(hits[0]).toMatchObject({ title: "A", tags: [], anchor: "backup-bazy", snippet: null });
-    expect(hits[1]!.anchor).toBeNull();
+    expect(hits[0]).toMatchObject({ title: "A", tags: [], anchor: "backup-bazy", heading: "Backup bazy", snippet: null });
+    expect(hits[1]).toMatchObject({ anchor: null, heading: null });
     expect(hits[0]!.score).toBeLessThan(hits[1]!.score);
   });
 

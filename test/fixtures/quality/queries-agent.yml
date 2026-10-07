@@ -1,0 +1,56 @@
+# Agent-style quality set: queries the way an AI agent sends them against ./kb.
+# Whole questions, synonyms of the words on the page, Polish questions about English pages and back.
+# Measured only (no regression floor): the baseline for tuning in roadmap stage 11.
+# Same format as queries.yml.
+
+# Whole questions
+- query: Ile dni urlopu przysługuje pracownikowi na umowie o pracę?
+  expect: /hr/urlopy.md
+- query: Co zrobić, gdy strona zwraca błąd 502 po wdrożeniu nowej aplikacji?
+  expect: /ops/nginx-reverse-proxy.md
+- query: How often are database backups taken and how long are they kept?
+  expect: /ops/backup-postgres.md
+- query: Do kiedy osoba na B2B musi wysłać fakturę za poprzedni miesiąc?
+  expect: /finance/faktury.md
+- query: Jakie są godziny, w których trzeba być dostępnym na Slacku przy pracy zdalnej?
+  expect: /hr/praca-zdalna.md
+- query: Co się stało podczas awarii bazy danych w marcu 2025 i jaka była przyczyna?
+  expect: /ops/incident-2025-03-db-outage.md
+- query: What happens when a refresh token is reused?
+  expect: /dev/api-authentication.md
+- query: Jak dodać nową kolumnę NOT NULL do dużej tabeli bez blokowania aplikacji?
+  expect: /dev/database-migrations.md
+- query: Co ustalono na retrospektywie w sprawie deployów w piątek?
+  expect: /meetings/2025-02-retro.md
+- query: Ile kosztuje karta Multisport dla pracownika?
+  expect: /hr/benefity.md
+- query: Which HTTP headers tell the client how many requests are left?
+  expect: /dev/rate-limiting.md
+- query: Ile czasu ma reviewer na odpowiedź na pull request?
+  expect: /dev/code-review.md
+
+# Synonyms (the page uses other words)
+- query: Jak cofnąć wadliwe wydanie na produkcji?
+  expect: [/ops/kubernetes-deploy.md, /dev/feature-flags.md]
+- query: Jak rozliczyć przejazd własnym autem w podróży służbowej?
+  expect: /hr/delegacje.md
+- query: Kto zatwierdza wniosek o wolne?
+  expect: /hr/urlopy.md
+- query: Czy mogę pracować przez miesiąc z Hiszpanii?
+  expect: /hr/praca-zdalna.md
+- query: Jak długo trwał ostatni test przywracania bazy?
+  expect: /ops/restore-drill.md
+- query: Kiedy wygasa certyfikat i skąd się o tym dowiem?
+  expect: /ops/certificates.md
+- query: Jak zgłosić, że jestem chory?
+  expect: /hr/urlopy.md
+- query: Gdzie zaparkować auto przy biurze?
+  expect: /office/biuro-lodz.md
+
+# Cross-language (question in one language, page in the other)
+- query: What is the API request limit per minute for an integration key?
+  expect: /dev/rate-limiting.md
+- query: Jak długo przechowywane są logi aplikacji?
+  expect: /dev/logging.md
+- query: How do I connect to a production server over SSH?
+  expect: /ops/ssh-access.md

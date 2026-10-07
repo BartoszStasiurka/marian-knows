@@ -22,8 +22,13 @@ const QuerySchema = z
 
 export type QualityQuery = z.output<typeof QuerySchema>;
 
-export function loadQueries(): QualityQuery[] {
-  const raw: unknown = parseYaml(readFileSync(path.join(FIXTURES, "queries.yml"), "utf8"));
+/** Hand-written keyword queries; guarded by regression floors. */
+export const KEYWORD_SET = "queries.yml";
+/** Agent-style queries (questions, synonyms, cross-language); measured only. */
+export const AGENT_SET = "queries-agent.yml";
+
+export function loadQueries(file: string = KEYWORD_SET): QualityQuery[] {
+  const raw: unknown = parseYaml(readFileSync(path.join(FIXTURES, file), "utf8"));
   return z.array(QuerySchema).parse(raw);
 }
 
@@ -67,10 +72,10 @@ export function evaluate(config: LoadedConfig, queries: QualityQuery[]): Quality
   };
 }
 
-export function formatReport(report: QualityReport): string {
+export function formatReport(report: QualityReport, label = "quality"): string {
   const hits = report.outcomes.filter((o) => o.rank !== null).length;
   const lines = [
-    `quality: hit@${TOP_K} ${hits}/${report.outcomes.length} (${(report.hitRate * 100).toFixed(1)}%), ` +
+    `${label}: hit@${TOP_K} ${hits}/${report.outcomes.length} (${(report.hitRate * 100).toFixed(1)}%), ` +
       `MRR ${report.mrr.toFixed(3)}`,
   ];
   for (const o of report.outcomes) {
@@ -85,7 +90,9 @@ export function formatReport(report: QualityReport): string {
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   const dir = mkdtempSync(path.join(tmpdir(), "marian-knows-quality-"));
   try {
-    console.log(formatReport(evaluate(await indexFixture(dir), loadQueries())));
+    const config = await indexFixture(dir);
+    console.log(formatReport(evaluate(config, loadQueries())));
+    console.log(formatReport(evaluate(config, loadQueries(AGENT_SET)), "agent queries"));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

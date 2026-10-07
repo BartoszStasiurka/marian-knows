@@ -107,6 +107,7 @@ CREATE VIRTUAL TABLE sections_fts USING fts5(         -- rowid = sections.id
 - Polska fleksja prefiksem, bez stemmera: słowa dłuższe niż 4 znaki skracane o 2 ostatnie litery, ale nie krócej niż do 4 znaków, i dopasowywane jako prefiks (`konfiguracja` znajdzie „konfigurację", „konfiguracji"; `biura` → `biur*` znajdzie „biuro"); słowa do 4 znaków dopasowywane jako prefiks bez skracania. Znaki specjalne FTS5 są usuwane. Litery `ł`/`Ł` są sprowadzane do `l`/`L` w kolumnach FTS i w zapytaniu (tokenizer nie usuwa z nich diakrytyku), więc `zolw` znajdzie „żółw”; `docs`, `sections` i snippety zachowują oryginalny tekst.
 - `-n <limit>`: domyślnie 10 plików. `--tag <tag>`: pliki z tym tagiem, bez rozróżniania wielkości liter; filtr działa przed fallbackiem i limitem. `--exact` wyłącza skracanie, prefiksy i fallback do OR.
 - **Zestaw testowy jakości:** baza fixture (`test/fixtures/quality/kb/`) i plik z zapytaniami i oczekiwanymi trafieniami (`test/fixtures/quality/queries.yml`), mierzący trafność w top 5 (hit@5) i MRR; uruchamiany w `npm test` z progami regresji, służy do strojenia wag, progu fallbacku, stop-słów, skracania słów i rozmiarów sekcji. Szybki raport bez vitest: `npx tsx test/quality.ts`.
+- **Zestaw zapytań agentowych** (`test/fixtures/quality/queries-agent.yml`): pełne pytania, synonimy słów ze strony, pytania po polsku o strony angielskie i odwrotnie. Tylko pomiar, bez progów regresji; punkt odniesienia do strojenia pod agentów. Pierwszy pomiar (23 zapytania): hit@5 91,3%, MRR 0,754.
 
 **Zakres ścieżek**
 - `--path <prefiks>` (w `search` i `list`): poddrzewo ścieżek wirtualnych na dowolnej głębokości. Prefiks z końcowym `/` obejmuje katalog (`/projekt/A/` nie obejmuje `/projekt/AB/`); bez końcowego `/` oznacza pojedynczy plik.
@@ -124,10 +125,10 @@ marian-knows parse <file> [--json]    # parsowanie pliku wskazanego ścieżką d
 marian-knows index [--full]           # (re)indeksowanie
 marian-knows search <query> [opcje]   # pliki wg rankingu
 marian-knows list [opcje]             # pliki z indeksu, posortowane po ścieżce
-marian-knows get <path>               # zawartość pliku z indeksu (ścieżka wirtualna)
+marian-knows get <path>[#anchor]      # zawartość pliku albo jednej sekcji z indeksu (ścieżka wirtualna)
 marian-knows status [--json]          # stan projektu: konfiguracja, liczba plików i sekcji, rozmiar, czas i wiek indeksu
 marian-knows destroy                  # usuwa indeks i logi (katalog .marian-knows/); konfiguracja zostaje
-marian-knows log [opcje]              # v2: przegląd logu zapytań
+marian-knows log [opcje]              # przegląd logu zapytań
 marian-knows serve [--http --port <n>] # v2: serwer MCP (domyślnie stdio)
 marian-knows token add|list|revoke    # v2: tokeny dostępu do serwera HTTP
 marian-knows help                     # pomoc (także --help)
@@ -140,13 +141,14 @@ Opcja globalna: `--config <plik>` (dla `init`: plik, który ma zostać utworzony
 | `search` | `-n <limit>`, `--json`, `--snippets`, `--tag <tag>`, `--exact`, `--path <prefiks>`, `--exclude-path <prefiks>` |
 | `list`   | `--json`, `--tag <tag>`, `--path <prefiks>`, `--exclude-path <prefiks>`                                        |
 | `scan`   | `--json`, `--disk` (dołącza ścieżki dyskowe, wyłącznie diagnostycznie)                                         |
-| `log`    | `--zero`, `--days <n>`, `--json` (v2, sekcja 9)                                                                |
+| `get`    | `--max-chars <n>` (limit znaków odpowiedzi, `0` = bez limitu; sekcja 9)                                        |
+| `log`    | `--zero`, `--days <n>`, `--json` (sekcja 9)                                                                    |
 
 **`init <project_name>`:** nazwa podlega tym samym zasadom co `name`. Domyślny cel to `./marian-knows.yml`; istniejący plik nigdy nie jest nadpisywany (kod 2). Polecenie nie modyfikuje `.gitignore` i nie tworzy plików bazy danych.
 
 **`parse <file>`:** diagnostyka parsera, nie wymaga konfiguracji. Domyślnie wypisuje tytuł, tagi, frontmatter i listę sekcji z podglądem treści; `--json` wypisuje jeden obiekt `{title, tags, frontmatter, sections}`. Ostrzeżenia idą na stderr; nieczytelny plik to kod 2.
 
-**`get <path>`:** wypisuje plik bez zmian (bajty z dysku, bez normalizacji). Obsługuje wyłącznie pliki obecne w indeksie, więc nie odczyta niczego, czego nie pokazuje `list` (plików wykluczonych, ukrytych, spoza `.md`). Ścieżka z końcowym `/`, ścieżka spoza indeksu i plik usunięty po indeksowaniu to błąd (kod 2).
+**`get <path>`:** wypisuje plik bez zmian (bajty z dysku, bez normalizacji), z zastrzeżeniem limitu znaków (sekcja 9). Obsługuje wyłącznie pliki obecne w indeksie, więc nie odczyta niczego, czego nie pokazuje `list` (plików wykluczonych, ukrytych, spoza `.md`). Ścieżka z końcowym `/`, ścieżka spoza indeksu i plik usunięty po indeksowaniu to błąd (kod 2).
 
 **`status`:** nazwa projektu, ścieżka pliku konfiguracji i katalogu źródłowego (diagnostycznie), `exclude`, stan indeksu (`ok`, `missing`, `outdated`), liczba plików i sekcji, rozmiar bazy (`index.db` z `-wal` i `-shm`), czas i wiek indeksowania. Brak indeksu nie jest błędem (kod 0).
 
@@ -174,7 +176,7 @@ Files: 42
 ```
 
 - **Kontrakt `--json`** (stabilny, korzysta z niego m.in. przyszły MCP): `search` i `list` wypisują gołą tablicę obiektów, po jednym na plik, w kolejności rankingu (`list`: po ścieżce). Bez koperty i `schemaVersion` w v1.
-- `search`: `path`, `title`, `tags` (tablica), `score`, `anchor` (najlepsza sekcja pliku), `snippet` (wypełniony tylko z `--snippets`). `list`: `path`, `title`, `tags`. Pola nie są pomijane: brak wartości to `null` (`tags`: `[]`).
+- `search`: `path`, `title`, `tags` (tablica), `score`, `anchor` (najlepsza sekcja pliku), `heading` (jej nagłówek), `snippet` (wypełniony tylko z `--snippets`). `list`: `path`, `title`, `tags`. Pola nie są pomijane: brak wartości to `null` (`tags`: `[]`).
 - `status --json`: jeden obiekt `{name, config, path, pathExists, exclude, index, files, sections, dbSize, indexedAt, ageSeconds}`; `index` to `ok`, `missing` albo `outdated`, pozostałe pola indeksu są `null`, gdy indeks nie jest `ok` (`dbSize` także przy `outdated`).
 - `score` to `bm25` (niższa wartość = lepiej), porównywalny tylko w obrębie jednego zapytania.
 - Zmiany dodające pola są zgodne wstecz; usunięcie pola lub zmiana jego znaczenia wymaga podniesienia wersji głównej `marian-knows`.
@@ -184,8 +186,8 @@ Files: 42
 | Kod | Znaczenie                                                                                |
 | --- | ---------------------------------------------------------------------------------------- |
 | 0   | OK                                                                                       |
-| 1   | brak wyników w `search` i `list` (jak `grep`)                                            |
-| 2   | błąd: brak konfiguracji, zły YAML, błędna konfiguracja lub ścieżka, brak indeksu, zła składnia wywołania (nieznana opcja, nadmiarowy argument), trwający `index`, każdy nieoczekiwany wyjątek |
+| 1   | brak wyników w `search`, `list` i `log` (jak `grep`)                                     |
+| 2   | błąd: brak konfiguracji, zły YAML, błędna konfiguracja lub ścieżka, nieznana kotwica, brak indeksu, zła składnia wywołania (nieznana opcja, nadmiarowy argument), trwający `index`, każdy nieoczekiwany wyjątek |
 
 Przy braku indeksu: `No index. Run: marian-knows index`.
 
@@ -195,7 +197,7 @@ Przy braku indeksu: `No index. Run: marian-knows index`.
 marian-knows/
 ├─ package.json     # bin: { "marian-knows": "dist/cli.js" }, exports: { "./core": ... }
 └─ src/
-   ├─ core/         # config, scan, init, indexer, search, list
+   ├─ core/         # config, scan, init, indexer, search, list, get, log
    └─ cli.ts        # argumenty i formatowanie wyjścia
 ```
 
@@ -222,8 +224,8 @@ Cel: baza wiedzy dla agentów AI, wystawiona jako serwer MCP w sieci. Jeden serw
 **Bezpieczeństwo treści.** Treść bazy trafia bez zmian do kontekstu agenta. Kto ma prawo zapisu do repozytorium wiedzy, ten może sterować podłączonymi agentami (prompt injection); zapis do repo traktujemy jak uprawnienie administracyjne.
 
 **Odczyt sekcji**
-- `get` przyjmuje `<ścieżka>` albo `<ścieżka>#<kotwica>`; z kotwicą zwraca wszystkie części sekcji o tej kotwicy (nagłówek + treść). Nieznana kotwica to błąd (kod 2).
-- Odpowiedź `get` ma limit znaków (wartość do strojenia); obcięta treść kończy się informacją o obcięciu i sugestią odczytu po kotwicy.
+- `get` przyjmuje `<ścieżka>` albo `<ścieżka>#<kotwica>` (pierwszy `#` zaczyna kotwicę; nazwy plików z `#` nie są skanowane); z kotwicą zwraca wszystkie części sekcji o tej kotwicy: linię nagłówka i treść części, tak jak widzi je parser. Plik jest parsowany w chwili odczytu, więc kotwice odpowiadają aktualnej treści na dysku. Sekcja krótka, scalona z poprzednią, nie ma własnej kotwicy. Nieznana albo pusta kotwica to błąd (kod 2); komunikat wymienia kotwice pliku.
+- Odpowiedź `get` ma limit znaków: domyślnie 20 000 (jednostki UTF-16, do strojenia), `--max-chars <n>` w CLI, `0` wyłącza limit. Cięcie następuje na ostatnim końcu linii w drugiej połowie limitu (inaczej na limicie, nigdy w środku pary surogatów). Obcięta treść kończy się informacją `[truncated: showed N of M characters. …]`; dla całego pliku z sugestią `get <ścieżka>#<kotwica>` i listą kotwic pliku (najwyżej 50).
 - `search --json` dostaje pole `heading` (nagłówek najlepszej sekcji, `null` dla sekcji 0). Zmiana zgodna wstecz.
 
 **Narzędzia MCP**
@@ -234,11 +236,13 @@ Cel: baza wiedzy dla agentów AI, wystawiona jako serwer MCP w sieci. Jeden serw
 
 **Log zapytań** (wspólny dla CLI i MCP)
 - Pliki `.marian-knows/logs/queries-YYYY-MM-DD.jsonl`, jeden obiekt JSON na linię.
-- Wpis: `ts` (ISO 8601), `source` (`cli` / `mcp`), `who` (`cli` albo nazwa tokenu; `local` dla stdio), `op` (`search` / `get` / `list`), `query`, `filters`, `results` (liczba), `top` (do 5 ścieżek wirtualnych), `ms`.
+- Plik dzienny według daty UTC z `ts`.
+- Wpis: `ts` (ISO 8601, UTC), `source` (`cli` / `mcp`), `who` (`cli` albo nazwa tokenu; `local` dla stdio), `op` (`search` / `get` / `list`), `query` (zapytanie albo `ścieżka#kotwica` dla `get`; `null` dla `list`), `filters` (tylko podane: `tag`, `paths`, `excludePaths`, `limit`, `exact`), `results` (liczba plików; `get`: 1), `top` (do 5 ścieżek wirtualnych), `ms`.
+- Logowane są wywołania zakończone sukcesem, także bez wyników; błędy (zła ścieżka, brak pliku, brak indeksu) nie.
 - Bez treści odpowiedzi i bez ścieżek dyskowych. Błąd zapisu logu to ostrzeżenie na stderr, nigdy błąd komendy.
-- `MARIAN_KNOWS_NO_LOG=1` wyłącza log.
+- `MARIAN_KNOWS_NO_LOG=1` (każda niepusta wartość poza `0`) wyłącza log.
 - Retencja: przy zapisie usuwane są pliki starsze niż 90 dni (zapytania mogą zawierać dane osobowe).
-- `marian-knows log [--zero] [--days N] [--json]`: przegląd, domyślnie ostatnie 7 dni; `--zero` pokazuje tylko zapytania bez wyników (dziury w bazie, materiał do zestawu jakości).
+- `marian-knows log [--zero] [--days N] [--json]`: przegląd, domyślnie ostatnie 7 dni (N × 24 h wstecz), od najstarszych; `--zero` pokazuje tylko zapytania bez wyników (dziury w bazie, materiał do zestawu jakości). Domyślnie jedna linia na wpis (czas UTC, `who`, `op`, liczba wyników, zapytanie, filtry jako JSON); `--json` to goła tablica wpisów. Pusty log: kod 1 (`[]` z `--json`). Uszkodzone linie są pomijane z ostrzeżeniem. `log` nie wymaga indeksu.
 
 **Tokeny (HTTP)**
 - Tokeny nieprzezroczyste per osoba, nagłówek `Authorization: Bearer <token>`. Brak lub zły token: 401, wpis do `.marian-knows/logs/access-YYYY-MM-DD.jsonl`.

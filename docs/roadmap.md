@@ -115,20 +115,23 @@ Pure functions, no DB.
 - [x] Build check: `npm pack` and run the packed CLI
 - [x] README: install, config, commands, JSON contract
 
-## 9. Core for agents
+## 9. Core for agents (done)
 
-- [ ] `getSection(path, anchor)` in core; `get` accepts `path#anchor`
-- [ ] `search --json`: add `heading` of the best section
-- [ ] Character limit on `get` output, with a truncation notice
-- [ ] Extend the quality set with ~20 agent-style queries (questions, synonyms); measure only, no tuning
-- [ ] Query log in core (`src/core/log.ts`), shared by CLI and MCP
+- [x] `getSection(path, anchor)` in core; `get` accepts `path#anchor`
+- [x] `search --json`: add `heading` of the best section
+- [x] Character limit on `get` output, with a truncation notice
+  - 20000 chars by default, `--max-chars <n>` in the CLI (`0` = no limit); the notice lists the file's anchors.
+- [x] Extend the quality set with ~20 agent-style queries (questions, synonyms); measure only, no tuning
+  - `queries-agent.yml`, 23 queries: hit@5 91.3%, MRR 0.754 (keyword set: 100%, 0.946). Misses: a synonym
+    ("Hiszpania" for "spoza Polski") and a Polish question about an English page.
+- [x] Query log in core (`src/core/log.ts`), shared by CLI and MCP
   - `.marian-knows/logs/queries-YYYY-MM-DD.jsonl`, one file per day
   - Entry: `ts`, `source` (`cli` / `mcp`), `who` (`cli` or token name), `op` (`search` / `get` / `list`),
     query and filters, result count, top 5 virtual paths, duration in ms
   - No response content, no disk paths; a failed log write is a warning, never a command error
   - `MARIAN_KNOWS_NO_LOG=1` disables it (tests, scripts)
   - Files older than 90 days are deleted on write; `destroy` removes logs with the rest of `.marian-knows/`
-- [ ] `log [--zero] [--days N] [--json]` command; `--zero` = queries with no results
+- [x] `log [--zero] [--days N] [--json]` command; `--zero` = queries with no results
 
 ## 10. MCP over stdio
 

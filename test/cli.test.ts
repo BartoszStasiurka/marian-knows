@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { makeTree, runCli } from "./helpers.js";
@@ -329,7 +329,7 @@ describe.concurrent("search --json and scope", () => {
     expect(r.stderr).toBe("");
     const hits = JSON.parse(r.stdout);
     expect(hits).toEqual([
-      { path: "/server/deploy.md", title: "Deploy", tags: ["ops"], score: expect.any(Number), anchor: "harmonogram", snippet: null },
+      { path: "/server/deploy.md", title: "Deploy", tags: ["ops"], score: expect.any(Number), anchor: "harmonogram", heading: "Harmonogram", snippet: null },
     ]);
     const withSnippet = JSON.parse((await runCli(["search", "codzienny", "--json", "--snippets"], { cwd: dir })).stdout);
     expect(withSnippet[0].snippet).toContain("[codzienny]");
@@ -438,6 +438,119 @@ describe.concurrent("get", () => {
     expect(cases[0]!.stderr).toContain("forbidden segment '..'");
     expect(cases[2]!.stderr).toContain("must be a file path, not a directory");
     expect(cases[3]!.stderr).toBe("error: not in the index: /secret.md\n");
+  });
+});
+
+describe.concurrent("get sections and limits", () => {
+  const PAD = "Lorem ipsum dolor sit amet consectetur. ".repeat(6);
+
+  async function project(): Promise<string> {
+    const dir = makeTree({
+      "marian-knows.yml": "name: P\n",
+      "deploy.md": `# Deploy\n\n## Backup bazy\n\nKopia o 03:00. ${PAD}\n\n## Restore\n\nOdtwarzanie. ${PAD}\n`,
+    });
+    expect((await runCli(["index"], { cwd: dir })).code).toBe(0);
+    return dir;
+  }
+
+  it("get <path>#<anchor> prints one section", async () => {
+    const dir = await project();
+    expect(await runCli(["get", "/deploy.md#restore"], { cwd: dir })).toMatchObject({
+      code: 0,
+      stdout: `## Restore\n\nOdtwarzanie. ${PAD.trim()}\n`,
+      stderr: "",
+    });
+  });
+
+  it("unknown or empty anchor: exit 2", async () => {
+    const dir = await project();
+    const [unknown, empty] = await Promise.all([
+      runCli(["get", "/deploy.md#nope"], { cwd: dir }),
+      runCli(["get", "/deploy.md#"], { cwd: dir }),
+    ]);
+    expect(unknown).toMatchObject({
+      code: 2,
+      stdout: "",
+      stderr: "error: no section #nope in /deploy.md; anchors: #backup-bazy, #restore\n",
+    });
+    expect(empty).toMatchObject({ code: 2, stdout: "" });
+    expect(empty.stderr).toContain("empty anchor after '#'");
+  });
+
+  it("--max-chars cuts the output with a notice; 0 = whole file; bad value: exit 2", async () => {
+    const dir = await project();
+    const [cut, whole, bad] = await Promise.all([
+      runCli(["get", "/deploy.md", "--max-chars", "100"], { cwd: dir }),
+      runCli(["get", "/deploy.md", "--max-chars", "0"], { cwd: dir }),
+      runCli(["get", "/deploy.md", "--max-chars", "-1"], { cwd: dir }),
+    ]);
+    expect(cut.code).toBe(0);
+    expect(cut.stdout).toMatch(/\n\n\[truncated: showed \d+ of \d+ characters\. Read one section with get \/deploy\.md#<anchor>\. Anchors: #backup-bazy, #restore\.\]\n$/);
+    expect(whole.stdout).toBe(readFileSync(path.join(dir, "deploy.md"), "utf8"));
+    expect(bad.code).toBe(2);
+  });
+});
+
+describe.concurrent("query log", () => {
+  async function project(): Promise<string> {
+    const dir = makeTree({ "marian-knows.yml": "name: P\n", "a.md": "# A\n\n## Backup\n\nbackup bazy\n", "b.md": "# B" });
+    expect((await runCli(["index"], { cwd: dir })).code).toBe(0);
+    return dir;
+  }
+
+  it("search, get and list are logged; log prints them, --zero and --json filter and format", async () => {
+    const dir = await project();
+    const opts = { cwd: dir, log: true };
+    await runCli(["search", "backup", "--tag", "x"], opts);
+    await runCli(["search", "backup"], opts);
+    await runCli(["get", "/a.md#backup"], opts);
+    await runCli(["list", "--path", "/a.md"], opts);
+    await runCli(["get", "/nope.md"], opts); // errors are not logged
+
+    const json = await runCli(["log", "--json"], { cwd: dir });
+    expect(json.code).toBe(0);
+    const entries = JSON.parse(json.stdout);
+    expect(entries.map((e: { op: string; query: string | null; results: number }) => [e.op, e.query, e.results])).toEqual([
+      ["search", "backup", 0],
+      ["search", "backup", 1],
+      ["get", "/a.md#backup", 1],
+      ["list", null, 1],
+    ]);
+    expect(entries[0]).toMatchObject({ source: "cli", who: "cli", filters: { tag: "x" }, top: [] });
+    expect(entries[1]).toMatchObject({ filters: {}, top: ["/a.md"], ms: expect.any(Number) });
+    expect(entries[3].filters).toEqual({ paths: ["/a.md"] });
+    // No disk paths in the log.
+    const raw = readdirSync(path.join(dir, ".marian-knows", "logs")).map((f) =>
+      readFileSync(path.join(dir, ".marian-knows", "logs", f), "utf8"),
+    );
+    expect(raw.join("")).not.toContain(dir);
+
+    const zero = await runCli(["log", "--zero"], { cwd: dir });
+    expect(zero.code).toBe(0);
+    expect(zero.stdout).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}  cli  search  0  "backup"  \{"tag":"x"\}\n$/);
+  });
+
+  it("MARIAN_KNOWS_NO_LOG=1 leaves no log; empty log: exit 1 ([] with --json)", async () => {
+    const dir = await project();
+    await runCli(["search", "backup"], { cwd: dir });
+    expect(existsSync(path.join(dir, ".marian-knows", "logs"))).toBe(false);
+    expect(await runCli(["log"], { cwd: dir })).toMatchObject({ code: 1, stdout: "", stderr: "" });
+    expect(await runCli(["log", "--json", "--days", "30"], { cwd: dir })).toMatchObject({ code: 1, stdout: "[]\n" });
+  });
+
+  it("--days expects a positive integer", async () => {
+    const dir = makeTree({ "marian-knows.yml": "name: P\n" });
+    const r = await runCli(["log", "--days", "0"], { cwd: dir });
+    expect(r).toMatchObject({ code: 2, stdout: "" });
+    expect(r.stderr).toBe("error: --days expects a positive integer, got '0'\n");
+  });
+
+  it("destroy removes the logs with the index", async () => {
+    const dir = await project();
+    await runCli(["search", "backup"], { cwd: dir, log: true });
+    expect(existsSync(path.join(dir, ".marian-knows", "logs"))).toBe(true);
+    expect((await runCli(["destroy"], { cwd: dir })).code).toBe(0);
+    expect(existsSync(path.join(dir, ".marian-knows"))).toBe(false);
   });
 });
 

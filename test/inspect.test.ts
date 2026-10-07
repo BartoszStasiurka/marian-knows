@@ -7,11 +7,15 @@ import {
   IndexLockedError,
   IndexMissingError,
   InvalidPathError,
+  GET_MAX_CHARS,
   destroyIndex,
+  get,
   getDoc,
+  getSection,
   indexPath,
   list,
   loadConfig,
+  parseDocRef,
   rebuildIndex,
   status,
 } from "../src/core/index.js";
@@ -75,7 +79,33 @@ describe("getDoc", () => {
   it("returns the file content as on disk", async () => {
     const raw = "﻿# Tytuł\r\n\r\nTreść.\r\n";
     const { config } = await indexed({ "docs/api/readme.md": raw }, "name: T\npath: ./docs\n");
-    expect(getDoc(config, "/api/readme.md")).toEqual({ path: "/api/readme.md", content: raw });
+    expect(getDoc(config, "/api/readme.md")).toEqual({ path: "/api/readme.md", anchor: null, content: raw, truncated: false });
+  });
+
+  it("cuts long files at a line break and suggests anchors", async () => {
+    const body = (n: number) => `${Array(20).fill("Zdanie testowe.").join(" ")}\n`.repeat(n);
+    const raw = `# Doc\n\n## Pierwsza\n\n${body(5)}\n## Druga\n\n${body(5)}`;
+    const { config } = await indexed({ "a.md": raw });
+    const r = getDoc(config, "/a.md", { maxChars: 1000 });
+    expect(r.truncated).toBe(true);
+    const [kept, notice] = r.content.split("\n\n[truncated: ");
+    expect(raw.startsWith(kept!)).toBe(true);
+    expect(kept!.length).toBeLessThanOrEqual(1000);
+    expect(raw[kept!.length]).toBe("\n");
+    expect(notice).toBe(
+      `showed ${kept!.length} of ${raw.length} characters. Read one section with get /a.md#<anchor>. ` +
+        "Anchors: #pierwsza, #druga.]\n",
+    );
+    expect(getDoc(config, "/a.md", { maxChars: 0 })).toMatchObject({ content: raw, truncated: false });
+    expect(getDoc(config, "/a.md", { maxChars: raw.length })).toMatchObject({ content: raw, truncated: false });
+    // Default cap applies when no option is given.
+    expect(getDoc(config, "/a.md").truncated).toBe(raw.length > GET_MAX_CHARS);
+  });
+
+  it("never cuts inside a surrogate pair", async () => {
+    const { config } = await indexed({ "a.md": "😀".repeat(100) });
+    const r = getDoc(config, "/a.md", { maxChars: 51 });
+    expect(r.content.startsWith("😀".repeat(25) + "\n\n[truncated: showed 50 of 200 characters.]")).toBe(true);
   });
 
   it("serves only indexed files", async () => {
@@ -97,6 +127,57 @@ describe("getDoc", () => {
     const { dir, config } = await indexed({ "a.md": "a" });
     rmSync(path.join(dir, "a.md"));
     expect(() => getDoc(config, "/a.md")).toThrow(/cannot read \/a\.md \(ENOENT\)/);
+  });
+});
+
+describe("getSection / get", () => {
+  const PAD = "Lorem ipsum dolor sit amet consectetur. ".repeat(6);
+  const raw =
+    `---\ntitle: Deploy\n---\nWstęp. ${PAD}\n\n## Backup\n\nKopia o 03:00. ${PAD}\n\n` +
+    `### Retencja\n\n7 dni. ${PAD}\n\n## Krótka\n\nmało\n\n## Długa\n\n${`${PAD}\n\n`.repeat(12)}`;
+
+  it("returns the heading and body of one section", async () => {
+    const { config } = await indexed({ "a.md": raw });
+    expect(getSection(config, "/a.md", "retencja")).toEqual({
+      path: "/a.md",
+      anchor: "retencja",
+      // A short section merged into the previous one comes with it.
+      content: `### Retencja\n\n7 dni. ${PAD.trim()}\n\n## Krótka\n\nmało\n`,
+      truncated: false,
+    });
+    expect(getSection(config, "/a.md", "backup").content).toBe(`## Backup\n\nKopia o 03:00. ${PAD.trim()}\n`);
+  });
+
+  it("joins every part of a split section", async () => {
+    const { config } = await indexed({ "a.md": raw });
+    const { content } = getSection(config, "/a.md", "długa");
+    expect(content.startsWith("## Długa\n\n")).toBe(true);
+    expect(content.split(PAD.trim()).length - 1).toBe(12);
+  });
+
+  it("unknown anchor: error listing the file's anchors", async () => {
+    const { config } = await indexed({ "a.md": raw, "b.md": "no headings" });
+    expect(() => getSection(config, "/a.md", "nope")).toThrow(
+      "no section #nope in /a.md; anchors: #backup, #retencja, #długa",
+    );
+    expect(() => getSection(config, "/b.md", "x")).toThrow("no section #x in /b.md; the file has no sections");
+    expect(() => getSection(config, "/a.md", "")).toThrow(InvalidPathError);
+    expect(() => getSection(config, "/c.md", "x")).toThrow("not in the index: /c.md");
+  });
+
+  it("truncates a long section without anchor hints", async () => {
+    const { config } = await indexed({ "a.md": raw });
+    const r = getSection(config, "/a.md", "długa", { maxChars: 500 });
+    expect(r.truncated).toBe(true);
+    expect(r.content).toMatch(/\n\n\[truncated: showed \d+ of \d+ characters\.\]\n$/);
+  });
+
+  it("get takes <path> or <path>#<anchor>", async () => {
+    const { config } = await indexed({ "a.md": raw });
+    expect(get(config, "/a.md").content).toBe(raw);
+    expect(get(config, "/a.md#retencja").anchor).toBe("retencja");
+    expect(parseDocRef("/a/b.md#x#y")).toEqual({ path: "/a/b.md", anchor: "x#y" });
+    for (const ref of ["/a.md#", "a.md#x", "/x/#a"]) expect(() => parseDocRef(ref)).toThrow(InvalidPathError);
   });
 });
 

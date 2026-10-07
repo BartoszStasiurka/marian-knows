@@ -6,11 +6,13 @@ import {
   IndexMissingError,
   destroyIndex,
   findConfig,
-  getDoc,
+  get as getRef,
   initConfig,
   list as listIndex,
   loadConfig,
+  logQuery,
   parseFile,
+  readQueryLog,
   scanSource,
   search as searchIndex,
   status as projectStatus,
@@ -19,6 +21,8 @@ import {
   type LoadedConfig,
   type ParsedDoc,
   type ProjectStatus,
+  type QueryLogEntry,
+  type QueryRecord,
 } from "./core/index.js";
 
 const USAGE = `Usage: marian-knows <command> [options]
@@ -30,14 +34,15 @@ Commands:
   index [--full]        Sync the index (.marian-knows/index.db next to the config)
   search <query>        Search the index, one virtual path per line (exit 1: no results)
   list                  List indexed files sorted by path (exit 1: no files)
-  get <path>            Print an indexed file by virtual path
+  get <path>[#anchor]   Print an indexed file, or one section of it, by virtual path
   status                Show project, config and index state
-  destroy               Remove the index (.marian-knows/); the config stays
+  destroy               Remove the index and query logs (.marian-knows/); the config stays
+  log                   Show the query log (search, get, list), last 7 days
   help                  Show this help
 
 Options:
   --config <file>          Path to marian-knows.yml (for init: the file to create)
-  --json                   JSON output (scan, parse, search, list, status)
+  --json                   JSON output (scan, parse, search, list, status, log)
   --disk                   Include disk paths (scan; diagnostic only)
   --full                   Rebuild the index from scratch (index)
   -n <limit>               Max number of files (search; default 10)
@@ -46,6 +51,9 @@ Options:
   --path <prefix>          Only this subtree ('/dir/') or file ('/a.md'); repeatable (search, list)
   --exclude-path <prefix>  Leave out a subtree or file; repeatable (search, list)
   --snippets               Print a snippet under each path, matches in [...] (search)
+  --max-chars <n>          Cut the output after n characters, 0 = no limit (get; default 20000)
+  --days <n>               Entries from the last n days (log; default 7)
+  --zero                   Only queries with no results (log)
   -h, --help               Show this help`;
 
 const OPTIONS = {
@@ -59,15 +67,41 @@ const OPTIONS = {
   path: { type: "string", multiple: true },
   "exclude-path": { type: "string", multiple: true },
   snippets: { type: "boolean" },
+  "max-chars": { type: "string" },
+  days: { type: "string" },
+  zero: { type: "boolean" },
   help: { type: "boolean", short: "h" },
 } as const;
 
 /** Positional arguments each command takes after its name (search: any number of query words). */
-const ARITY: Record<string, number> = { init: 1, scan: 0, parse: 1, index: 0, list: 0, get: 1, status: 0, destroy: 0 };
+const ARITY: Record<string, number> = {
+  init: 1,
+  scan: 0,
+  parse: 1,
+  index: 0,
+  list: 0,
+  get: 1,
+  status: 0,
+  destroy: 0,
+  log: 0,
+};
 
 const warn = (warnings: string[]) => {
   for (const w of warnings) console.error(`! warning: ${w}`);
 };
+
+/** Parses a non-negative integer option; prints an error and returns null when it is not one. */
+function intOption(name: string, value: string, min: number): number | null {
+  const n = /^\d+$/.test(value) ? Number(value) : NaN;
+  if (n >= min) return n;
+  console.error(`error: ${name} expects ${min > 0 ? "a positive" : "a non-negative"} integer, got '${value}'`);
+  return null;
+}
+
+/** Appends a CLI entry to the query log; a failed write is only a warning. */
+function logCli(config: LoadedConfig, record: Omit<QueryRecord, "source" | "who">): void {
+  warn(logQuery(config, { source: "cli", who: "cli", ...record }));
+}
 
 /** Finds and loads the config; prints an error and returns null when there is none. */
 function requireConfig(explicit: string | undefined): LoadedConfig | null {
@@ -131,21 +165,17 @@ async function search(
   }
   let limit: number | undefined;
   if (values.limit !== undefined) {
-    limit = /^\d+$/.test(values.limit) ? Number(values.limit) : NaN;
-    if (!(limit >= 1)) {
-      console.error(`error: -n expects a positive integer, got '${values.limit}'`);
-      return 2;
-    }
+    const n = intOption("-n", values.limit, 1);
+    if (n === null) return 2;
+    limit = n;
   }
   const config = requireConfig(values.config);
   if (!config) return 2;
-  const { hits, warnings } = searchIndex(config, query, {
-    ...filterOptions(values),
-    limit,
-    exact: values.exact,
-    snippets: values.snippets,
-  });
+  const started = performance.now();
+  const filters = { ...filterOptions(values), limit, exact: values.exact };
+  const { hits, warnings } = searchIndex(config, query, { ...filters, snippets: values.snippets });
   warn(warnings);
+  logCli(config, { op: "search", query, filters, paths: hits.map((h) => h.path), ms: performance.now() - started });
   if (values.json) {
     console.log(JSON.stringify(hits));
   } else {
@@ -160,22 +190,61 @@ async function search(
 function list(values: FilterValues & { config?: string; json?: boolean }): number {
   const config = requireConfig(values.config);
   if (!config) return 2;
+  const started = performance.now();
   const { docs, warnings } = listIndex(config, filterOptions(values));
   warn(warnings);
+  logCli(config, {
+    op: "list",
+    query: null,
+    filters: filterOptions(values),
+    paths: docs.map((d) => d.path),
+    ms: performance.now() - started,
+  });
   if (values.json) console.log(JSON.stringify(docs));
   else for (const d of docs) console.log(d.path);
   return docs.length ? 0 : 1;
 }
 
-function get(virtualPath: string | undefined, values: { config?: string }): number {
-  if (virtualPath === undefined) {
-    console.error("error: missing <path>. Usage: marian-knows get <path>");
+function get(ref: string | undefined, values: { config?: string; "max-chars"?: string }): number {
+  if (ref === undefined) {
+    console.error("error: missing <path>. Usage: marian-knows get <path>[#anchor]");
     return 2;
+  }
+  let maxChars: number | undefined;
+  if (values["max-chars"] !== undefined) {
+    const n = intOption("--max-chars", values["max-chars"], 0);
+    if (n === null) return 2;
+    maxChars = n;
   }
   const config = requireConfig(values.config);
   if (!config) return 2;
-  process.stdout.write(getDoc(config, virtualPath).content);
+  const started = performance.now();
+  const doc = getRef(config, ref, { maxChars });
+  process.stdout.write(doc.content);
+  logCli(config, { op: "get", query: ref, paths: [doc.path], ms: performance.now() - started });
   return 0;
+}
+
+function formatLogEntry(e: QueryLogEntry): string {
+  const filters = Object.keys(e.filters ?? {}).length ? `  ${JSON.stringify(e.filters)}` : "";
+  const query = e.query === null ? "-" : JSON.stringify(e.query);
+  return `${e.ts.slice(0, 19).replace("T", " ")}  ${e.who}  ${e.op}  ${e.results}  ${query}${filters}`;
+}
+
+function log(values: { config?: string; days?: string; zero?: boolean; json?: boolean }): number {
+  let days: number | undefined;
+  if (values.days !== undefined) {
+    const n = intOption("--days", values.days, 1);
+    if (n === null) return 2;
+    days = n;
+  }
+  const config = requireConfig(values.config);
+  if (!config) return 2;
+  const { entries, warnings } = readQueryLog(config, { days, zero: values.zero });
+  warn(warnings);
+  if (values.json) console.log(JSON.stringify(entries));
+  else for (const e of entries) console.log(formatLogEntry(e));
+  return entries.length ? 0 : 1;
 }
 
 function formatBytes(n: number): string {
@@ -319,6 +388,8 @@ async function main(argv: string[]): Promise<number> {
         return status(values);
       case "destroy":
         return destroy(values);
+      case "log":
+        return log(values);
       default:
         console.error(`error: unknown command: ${command}\n\n${USAGE}`);
         return 2;

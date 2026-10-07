@@ -35,6 +35,7 @@ marian-knows init "My notes"     # creates ./marian-knows.yml (never overwrites)
 marian-knows index               # builds .marian-knows/index.db next to the config
 marian-knows search backup postgres --snippets
 marian-knows get /ops/backup.md
+marian-knows get /ops/backup.md#restore   # one section, by the anchor search returned
 ```
 
 Add `.marian-knows/` to your `.gitignore`; `init` does not touch it.
@@ -74,9 +75,10 @@ in diagnostics (`scan --disk`, `status`).
 | `index`               | Sync the index incrementally; `--full` rebuilds from scratch                      |
 | `search <query>`      | Files ranked by relevance, one virtual path per line                              |
 | `list`                | Indexed files sorted by path                                                      |
-| `get <path>`          | Print an indexed file unchanged                                                   |
+| `get <path>[#anchor]` | Print an indexed file unchanged, or one section of it                             |
 | `status`              | Project, config and index state (`--json`)                                        |
-| `destroy`             | Remove `.marian-knows/`; the config and `.md` files stay                          |
+| `destroy`             | Remove `.marian-knows/` (index and query logs); the config and `.md` files stay   |
+| `log`                 | Show the query log (`--days`, `--zero`, `--json`)                                 |
 | `help`                | Show help (also `--help`, `-h`)                                                   |
 
 ### Search
@@ -101,9 +103,29 @@ marian-knows search "pg_restore" --exact
 
 `list` takes the same `--tag`, `--path` and `--exclude-path` filters.
 
+### Get
+
+- `get /a.md` prints the file as it is on disk. `get /a.md#backup` prints the section with that anchor: its
+  heading line and every part of it (a long section is split into parts that share the anchor). An unknown
+  anchor is an error that lists the anchors the file has.
+- Output is capped at 20000 characters. A cut file ends with a `[truncated: …]` notice that lists the
+  file's anchors, so the next call can read one section. `--max-chars <n>` changes the cap, `0` turns it off.
+
+### Query log
+
+`search`, `get` and `list` append one JSON line per call to `.marian-knows/logs/queries-YYYY-MM-DD.jsonl`
+(UTC day): time, source, who, operation, query, filters, result count, top 5 virtual paths, duration. No
+response content and no disk paths. Files older than 90 days are deleted on write; `destroy` removes the
+logs with the index. A failed write is a warning, never an error. `MARIAN_KNOWS_NO_LOG=1` turns the log off.
+
+```bash
+marian-knows log                  # last 7 days, oldest first
+marian-knows log --zero --days 30 # queries with no results: gaps in the knowledge base
+```
+
 ## JSON output
 
-`search`, `list`, `status`, `scan` and `parse` accept `--json`. With `--json`, stdout carries JSON only;
+`search`, `list`, `status`, `log`, `scan` and `parse` accept `--json`. With `--json`, stdout carries JSON only;
 warnings and errors go to stderr.
 
 The `search`, `list` and `status` shapes are a stable contract. Adding fields is backwards compatible;
@@ -114,7 +136,7 @@ print `[]` with exit code 1. Fields are never omitted: a missing value is `null`
 
 ```bash
 $ marian-knows search backup --json -n 1 --snippets
-[{"path":"/server/deploy.md","title":"Deploy","tags":["ops"],"score":-8.41,"anchor":"harmonogram","snippet":"…[backup] bazy…"}]
+[{"path":"/server/deploy.md","title":"Deploy","tags":["ops"],"score":-8.41,"anchor":"harmonogram","heading":"Harmonogram","snippet":"…[backup] bazy…"}]
 
 $ marian-knows list --json
 [{"path":"/server/deploy.md","title":"Deploy","tags":["ops"]}]
@@ -127,6 +149,7 @@ $ marian-knows list --json
 | `tags`    | ✓        | ✓      | Frontmatter `tags` as an array                                        |
 | `score`   | ✓        |        | `bm25`, lower is better; comparable only within one query             |
 | `anchor`  | ✓        |        | Anchor of the file's best-matching section, `null` for the file start |
+| `heading` | ✓        |        | Heading of that section, `null` for the file start                    |
 | `snippet` | ✓        |        | Snippet with `[...]` matches; `null` without `--snippets`             |
 
 `status --json` prints one object:
@@ -145,8 +168,8 @@ $ marian-knows list --json
 | Code | Meaning                                                                                          |
 | ---- | ------------------------------------------------------------------------------------------------ |
 | 0    | OK                                                                                               |
-| 1    | No results from `search` or `list` (like `grep`)                                                 |
-| 2    | Error: missing or invalid config, invalid virtual path, missing index, bad arguments, `index` already running, unexpected failure |
+| 1    | No results from `search`, `list` or `log` (like `grep`)                                          |
+| 2    | Error: missing or invalid config, invalid virtual path, unknown anchor, missing index, bad arguments, `index` already running, unexpected failure |
 
 ## Library
 
@@ -162,7 +185,7 @@ applies to the JSON output.
 ## Development
 
 ```bash
-npm test                  # vitest, including the search quality set (hit@5, MRR)
+npm test                  # vitest, including the search quality sets (hit@5, MRR)
 npm run typecheck
 npm run build
 npm run dev -- search x   # run the CLI from source

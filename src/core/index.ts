@@ -16,7 +16,19 @@ export {
 export { hasTag, inScope, matchesPath, validateScope } from "./filter.js";
 export { fold } from "./fold.js";
 export { initConfig } from "./init.js";
-export { getDoc, list } from "./list.js";
+export { GET_MAX_CHARS, NOTICE_MAX_ANCHORS, get, getDoc, getSection, parseDocRef } from "./get.js";
+export { list } from "./list.js";
+export {
+  DEFAULT_LOG_DAYS,
+  LOG_DIRNAME,
+  LOG_RETENTION_DAYS,
+  LOG_TOP,
+  NO_LOG_ENV,
+  logDir,
+  logDisabled,
+  logQuery,
+  readQueryLog,
+} from "./log.js";
 export {
   INDEX_DIRNAME,
   INDEX_FILENAME,
@@ -55,7 +67,9 @@ export {
 export { status } from "./status.js";
 export type { DocFilterOptions } from "./filter.js";
 export type { IndexOptions } from "./indexer.js";
-export type { GetResult, ListItem, ListResult } from "./list.js";
+export type { DocRef, GetOptions, GetResult } from "./get.js";
+export type { ListItem, ListResult } from "./list.js";
+export type { LogOp, LogSource, QueryLogEntry, QueryRecord, ReadLogOptions, ReadLogResult } from "./log.js";
 export type { PreparedQuery, SearchHit, SearchOptions, SearchResult } from "./search.js";
 export type { ProjectStatus } from "./status.js";
 export type { IndexResult, LoadedConfig, ParsedDoc, ScanResult, ScannedFile, Section } from "./types.js";
