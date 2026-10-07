@@ -266,6 +266,7 @@ function formatAge(seconds: number): string {
 
 function printStatus(s: ProjectStatus): void {
   console.log(`Project: ${s.name}`);
+  if (s.description !== null) console.log(`Description: ${s.description}`);
   console.log(`Config: ${s.config}`);
   console.log(`Source: ${s.path}${s.pathExists ? "" : " (missing)"}`);
   console.log(`Exclude: ${s.exclude.length ? s.exclude.join(", ") : "-"}`);

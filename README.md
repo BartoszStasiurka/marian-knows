@@ -46,6 +46,9 @@ One `marian-knows.yml` describes one project with one source directory:
 
 ```yaml
 name: Customer knowledge base   # required, 1-128 chars
+description: >                  # optional, up to 2000 chars; shown to MCP agents
+  Support procedures and product FAQ, in Polish. Check here before answering
+  questions about orders, returns or shipping.
 path: ./docs                    # optional, relative to this file; defaults to its directory
 exclude:                        # optional, a glob or a list of globs relative to path
   - "**/draft/**"
@@ -137,6 +140,10 @@ does not sync the index yet.
 claude mcp add kb -- marian-knows serve --config /path/to/marian-knows.yml
 ```
 
+The agent decides whether to use the base from the server instructions and the `search` description, and both
+start with the config's `name` and `description`. Write `description` for the agent: what the base holds,
+in which language, and when to check it. Without one, the agent only learns that a knowledge base exists.
+
 | Tool     | Arguments                                                    | Result                                     |
 | -------- | ------------------------------------------------------------ | ------------------------------------------ |
 | `search` | `query`, `limit` (1-50), `tag`, `path[]`, `excludePath[]`, `exact` | JSON array as `search --json`, snippets always filled |
@@ -183,13 +190,14 @@ $ marian-knows list --json
 `status --json` prints one object:
 
 ```json
-{"name":"My notes","config":"/home/me/notes/marian-knows.yml","path":"/home/me/notes","pathExists":true,
+{"name":"My notes","description":null,"config":"/home/me/notes/marian-knows.yml","path":"/home/me/notes","pathExists":true,
  "exclude":[],"index":"ok","files":42,"sections":310,"dbSize":1048576,
  "indexedAt":"2026-01-01T10:00:00.000Z","ageSeconds":120}
 ```
 
 `index` is `ok`, `missing` or `outdated`. When it is not `ok`, the index fields (`files`, `sections`,
-`indexedAt`, `ageSeconds`) are `null`; `dbSize` is also `null` for `missing`.
+`indexedAt`, `ageSeconds`) are `null`; `dbSize` is also `null` for `missing`. `description` is `null` when the config has
+none.
 
 ## Exit codes
 

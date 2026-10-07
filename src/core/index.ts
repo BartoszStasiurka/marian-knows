@@ -1,6 +1,7 @@
 export {
   CONFIG_ENV,
   CONFIG_FILENAME,
+  MAX_DESCRIPTION_LENGTH,
   MAX_NAME_LENGTH,
   findConfig,
   loadConfig,

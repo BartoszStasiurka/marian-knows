@@ -142,6 +142,9 @@ Pure functions, no DB.
 - [x] Tool descriptions written for the model: 2-4 keywords per query, retry with synonyms, read sections by anchor
 - [x] Tests: SDK client against a temp-dir knowledge base
 - [ ] Manual check: connect to Claude Code and query a real knowledge base
+  - Found: the agent did not know when to use the server. Fixed with `description` (below).
+- [x] Optional `description` in the config, written for the agent: first in the server instructions and the
+  `search` description, also in `status`
 - [x] Index directory per config: `.marian-knows/<config name>/`, so several configs share a directory;
   `destroy` removes only its own; an old `.marian-knows/index.db` gets a warning
 

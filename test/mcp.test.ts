@@ -26,8 +26,8 @@ const FILES = {
   "hr/urlopy.md": "---\ntags: [hr]\n---\n# Urlopy\n\nKażdy pracownik ma 26 dni urlopu wypoczynkowego w roku.\n",
 };
 
-async function connect(files: Record<string, string> = FILES, opts: { index?: boolean } = {}) {
-  const dir = makeTree({ ...files, "marian-knows.yml": "name: Test KB\n" });
+async function connect(files: Record<string, string> = FILES, opts: { index?: boolean; yaml?: string } = {}) {
+  const dir = makeTree({ ...files, "marian-knows.yml": opts.yaml ?? "name: Test KB\n" });
   const config = loadConfig(path.join(dir, "marian-knows.yml"));
   if (opts.index !== false) await rebuildIndex(config);
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
@@ -130,12 +130,28 @@ describe("MCP server", () => {
     ]);
   });
 
+  it("puts the config's name and description in the instructions and the search description", async () => {
+    const yaml = "name: Test KB\ndescription: Company procedures in Polish. Check here first.\n";
+    const { client } = await connect(FILES, { yaml });
+    const about = 'Knowledge base "Test KB": Company procedures in Polish. Check here first.';
+    expect(client.getInstructions()).toMatch(new RegExp(`^${about}\\n\\n`));
+    expect(client.getInstructions()).toMatch(/search → get|path#anchor/);
+    const { tools } = await client.listTools();
+    expect(tools.find((t) => t.name === "search")!.description).toMatch(new RegExp(`^${about}\\n`));
+  });
+
+  it("without a description, tells the agent to look with list", async () => {
+    const { client } = await connect();
+    expect(client.getInstructions()).toMatch(/^Knowledge base "Test KB"\. No description is set: call list/);
+  });
+
   it("status leaves out disk paths", async () => {
     const { client, dir } = await connect();
     const r = await call(client, "status");
     expect(r.content[0]!.text).not.toContain(dir);
     expect(parsed(r)).toEqual({
       name: "Test KB",
+      description: null,
       pathExists: true,
       exclude: [],
       index: "ok",

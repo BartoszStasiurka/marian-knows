@@ -28,6 +28,7 @@ describe("loadConfig", () => {
       configPath: file,
       configDir: dir,
       name: "Test",
+      description: null,
       sourceDir: dir,
       sourceExists: true,
       exclude: [],
@@ -92,6 +93,22 @@ describe("loadConfig", () => {
     const dir = makeTree();
     expect(errorsOf(() => loadConfig(write(dir, "path: .\n")))[0]).toMatch(/^name:/);
     expect(errorsOf(() => loadConfig(write(dir, "name: [a]\n")))[0]).toMatch(/^name:/);
+  });
+
+  it("reads an optional description, trimmed", () => {
+    const dir = makeTree();
+    expect(loadConfig(write(dir, "name: T\ndescription: |\n  Company procedures.\n  Polish.\n")).description).toBe(
+      "Company procedures.\nPolish.",
+    );
+  });
+
+  it.each([
+    ["empty", 'description: "  "\n', "description: must not be empty"],
+    ["too long", `description: ${"x".repeat(2001)}\n`, "description: longer than 2000 characters"],
+    ["not a string", "description: [a]\n", "description:"],
+  ])("rejects a description that is %s", (_label, yaml, fragment) => {
+    const dir = makeTree();
+    expect(errorsOf(() => loadConfig(write(dir, `name: T\n${yaml}`)))[0]).toContain(fragment);
   });
 
   it("rejects the old sources field with a specific message", () => {

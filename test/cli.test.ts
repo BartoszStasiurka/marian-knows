@@ -573,6 +573,7 @@ describe.concurrent("status", () => {
     const json = JSON.parse((await runCli(["status", "--json"], { cwd: dir })).stdout);
     expect(json).toEqual({
       name: "Baza",
+      description: null,
       config: path.join(dir, "marian-knows.yml"),
       path: dir,
       pathExists: true,

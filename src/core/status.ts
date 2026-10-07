@@ -5,6 +5,7 @@ import type { LoadedConfig } from "./types.js";
 
 export interface ProjectStatus {
   name: string;
+  description: string | null;
   /** Disk path of the config file (diagnostic). */
   config: string;
   /** Disk path of the source directory (diagnostic). */
@@ -36,6 +37,7 @@ export function status(config: LoadedConfig, now: Date = new Date()): ProjectSta
   const size = ["", "-wal", "-shm"].reduce((sum, suffix) => sum + fileSize(db + suffix), 0);
   const result: ProjectStatus = {
     name: config.name,
+    description: config.description,
     config: config.configPath,
     path: config.sourceDir,
     pathExists: config.sourceExists,

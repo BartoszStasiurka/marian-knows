@@ -187,6 +187,7 @@ describe("status", () => {
     const config = loadConfig(path.join(dir, "marian-knows.yml"));
     expect(status(config)).toEqual({
       name: "Baza",
+      description: null,
       config: path.join(dir, "marian-knows.yml"),
       path: path.join(dir, "docs"),
       pathExists: false,

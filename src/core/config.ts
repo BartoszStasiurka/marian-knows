@@ -9,10 +9,12 @@ import { CONTROL_CHARS } from "./virtual-path.js";
 export const CONFIG_FILENAME = "marian-knows.yml";
 export const CONFIG_ENV = "MARIAN_KNOWS_CONFIG";
 export const MAX_NAME_LENGTH = 128;
+export const MAX_DESCRIPTION_LENGTH = 2000;
 
 const ConfigSchema = z
   .object({
     name: z.string(),
+    description: z.string().optional(),
     path: z.string().min(1).optional(),
     exclude: z.union([z.string(), z.array(z.string())]).optional(),
   })
@@ -83,6 +85,11 @@ export function loadConfig(configPath: string): LoadedConfig {
 
   const errors: string[] = [];
   for (const problem of validateProjectName(parsed.data.name)) errors.push(`name: ${problem}`);
+  const description = parsed.data.description?.trim();
+  if (description === "") errors.push("description: must not be empty");
+  if (description && description.length > MAX_DESCRIPTION_LENGTH) {
+    errors.push(`description: longer than ${MAX_DESCRIPTION_LENGTH} characters`);
+  }
 
   const sourceDir = path.resolve(configDir, parsed.data.path ?? ".");
   let sourceExists = false;
@@ -103,6 +110,7 @@ export function loadConfig(configPath: string): LoadedConfig {
     configPath: absConfig,
     configDir,
     name: parsed.data.name.trim(),
+    description: description ?? null,
     sourceDir,
     sourceExists,
     exclude: exclude === undefined ? [] : typeof exclude === "string" ? [exclude] : exclude,

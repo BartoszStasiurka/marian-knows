@@ -3,6 +3,8 @@ export interface LoadedConfig {
   configDir: string;
   /** Project identifier, trimmed. Metadata only for now. */
   name: string;
+  /** What the base holds and when to use it, written for an agent; trimmed. Null when not set. */
+  description: string | null;
   /** Absolute source directory on disk. Never stored in the index. */
   sourceDir: string;
   sourceExists: boolean;
