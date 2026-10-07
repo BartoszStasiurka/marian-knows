@@ -135,11 +135,12 @@ Pure functions, no DB.
 
 ## 10. MCP over stdio
 
-- [ ] Ask about and add `@modelcontextprotocol/sdk`
-- [ ] `src/mcp.ts` entry point (same repo, thin adapter over core like `src/cli.ts`)
-- [ ] Tools: `search`, `get` (file or `path#anchor`), `list`, `status`; virtual paths only
-- [ ] Tool descriptions written for the model: 2-4 keywords per query, retry with synonyms, read sections by anchor
-- [ ] Tests: SDK client against a temp-dir knowledge base
+- [x] Ask about and add `@modelcontextprotocol/sdk`
+- [x] `src/mcp.ts` entry point (same repo, thin adapter over core like `src/cli.ts`)
+  - Started by `marian-knows serve` (stdio), one bin; `--http` comes in stage 12
+- [x] Tools: `search`, `get` (file or `path#anchor`), `list`, `status`; virtual paths only
+- [x] Tool descriptions written for the model: 2-4 keywords per query, retry with synonyms, read sections by anchor
+- [x] Tests: SDK client against a temp-dir knowledge base
 - [ ] Manual check: connect to Claude Code and query a real knowledge base
 
 ## 11. Search quality for agents

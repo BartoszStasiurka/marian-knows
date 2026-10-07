@@ -28,9 +28,9 @@ export function makeTree(files: Record<string, string> = {}): string {
   return root;
 }
 
-const CLI = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
+export const CLI = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
 // Resolved from the repo, not from the subprocess cwd (a temp dir without node_modules).
-const TSX = pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href;
+export const TSX = pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href;
 
 export interface CliResult {
   code: number | null;

@@ -79,6 +79,7 @@ in diagnostics (`scan --disk`, `status`).
 | `status`              | Project, config and index state (`--json`)                                        |
 | `destroy`             | Remove `.marian-knows/` (index and query logs); the config and `.md` files stay   |
 | `log`                 | Show the query log (`--days`, `--zero`, `--json`)                                 |
+| `serve`               | Run the MCP server over stdio for AI agents                                       |
 | `help`                | Show help (also `--help`, `-h`)                                                   |
 
 ### Search
@@ -122,6 +123,30 @@ logs with the index. A failed write is a warning, never an error. `MARIAN_KNOWS_
 marian-knows log                  # last 7 days, oldest first
 marian-knows log --zero --days 30 # queries with no results: gaps in the knowledge base
 ```
+
+## MCP server
+
+`marian-knows serve` exposes the knowledge base to AI agents over MCP (stdio). It is read-only and uses the
+config found the usual way (`--config`, `MARIAN_KNOWS_CONFIG`, search upward). Run `index` first; the server
+does not sync the index yet.
+
+```bash
+claude mcp add kb -- marian-knows serve --config /path/to/marian-knows.yml
+```
+
+| Tool     | Arguments                                                    | Result                                     |
+| -------- | ------------------------------------------------------------ | ------------------------------------------ |
+| `search` | `query`, `limit` (1-50), `tag`, `path[]`, `excludePath[]`, `exact` | JSON array as `search --json`, snippets always filled |
+| `get`    | `path` (`/a.md` or `/a.md#anchor`)                           | Markdown, capped at 20000 characters       |
+| `list`   | `tag`, `path[]`, `excludePath[]`                             | JSON array as `list --json`                |
+| `status` | none                                                         | `status --json` without `config` and `path` (disk paths) |
+
+Virtual paths only. Errors (invalid path, unknown anchor, missing index) come back as tool errors with the
+CLI message; a scope that covers no file adds a `warning:` text block. Calls go to the query log with
+`source: "mcp"` and `who: "local"`.
+
+File content reaches the agent's context unchanged: whoever can write to the knowledge repo can steer
+connected agents (prompt injection), so treat write access to it as an admin right.
 
 ## JSON output
 

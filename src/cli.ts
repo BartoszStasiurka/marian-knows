@@ -24,6 +24,7 @@ import {
   type QueryLogEntry,
   type QueryRecord,
 } from "./core/index.js";
+import { serveStdio } from "./mcp.js";
 
 const USAGE = `Usage: marian-knows <command> [options]
 
@@ -38,6 +39,7 @@ Commands:
   status                Show project, config and index state
   destroy               Remove the index and query logs (.marian-knows/); the config stays
   log                   Show the query log (search, get, list), last 7 days
+  serve                 Run the MCP server over stdio (tools: search, get, list, status)
   help                  Show this help
 
 Options:
@@ -84,6 +86,7 @@ const ARITY: Record<string, number> = {
   status: 0,
   destroy: 0,
   log: 0,
+  serve: 0,
 };
 
 const warn = (warnings: string[]) => {
@@ -294,6 +297,14 @@ function destroy(values: { config?: string }): number {
   return 0;
 }
 
+async function serve(values: { config?: string }): Promise<number> {
+  const config = requireConfig(values.config);
+  if (!config) return 2;
+  // stdout carries the MCP protocol; the process lives until the client closes stdin.
+  await serveStdio(config);
+  return 0;
+}
+
 const PREVIEW_CHARS = 80;
 
 function preview(body: string): string {
@@ -390,6 +401,8 @@ async function main(argv: string[]): Promise<number> {
         return destroy(values);
       case "log":
         return log(values);
+      case "serve":
+        return await serve(values);
       default:
         console.error(`error: unknown command: ${command}\n\n${USAGE}`);
         return 2;
