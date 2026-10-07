@@ -9,7 +9,8 @@ Zastosowanie docelowe: karmienie asystenta AI, który pomaga klientowi. Ta sama 
 ## 2. Zakres
 
 - **W v1:** CLI `marian-knows` (Node.js 20+, ESM, TypeScript); indeks SQLite + FTS5 (`better-sqlite3`) na poziomie sekcji; wyszukiwanie (także w poddrzewie ścieżek), listowanie, odczyt plików; konfiguracja YAML (`yaml` + `zod`); skan katalogów (`fast-glob`).
-- **Poza v1:** serwer MCP, `--watch`, wyszukiwanie semantyczne, synonimy i aliasy, wyjątki fleksyjne i indeks trigramowy, widoczność treści (public/internal), edycja plików, UI.
+- **W v2:** serwer MCP tylko do odczytu (stdio i HTTP), log zapytań, odczyt sekcji, tokeny dostępu; szczegóły w sekcji 9.
+- **Poza v1 i v2:** `--watch`, wyszukiwanie semantyczne, synonimy i aliasy, wyjątki fleksyjne i indeks trigramowy, widoczność treści (public/internal), edycja plików, UI.
 
 ## 3. Konfiguracja: `marian-knows.yml`
 
@@ -125,7 +126,10 @@ marian-knows search <query> [opcje]   # pliki wg rankingu
 marian-knows list [opcje]             # pliki z indeksu, posortowane po ścieżce
 marian-knows get <path>               # zawartość pliku z indeksu (ścieżka wirtualna)
 marian-knows status [--json]          # stan projektu: konfiguracja, liczba plików i sekcji, rozmiar, czas i wiek indeksu
-marian-knows destroy                  # usuwa indeks (katalog .marian-knows/); konfiguracja zostaje
+marian-knows destroy                  # usuwa indeks i logi (katalog .marian-knows/); konfiguracja zostaje
+marian-knows log [opcje]              # v2: przegląd logu zapytań
+marian-knows serve [--http --port <n>] # v2: serwer MCP (domyślnie stdio)
+marian-knows token add|list|revoke    # v2: tokeny dostępu do serwera HTTP
 marian-knows help                     # pomoc (także --help)
 ```
 
@@ -136,6 +140,7 @@ Opcja globalna: `--config <plik>` (dla `init`: plik, który ma zostać utworzony
 | `search` | `-n <limit>`, `--json`, `--snippets`, `--tag <tag>`, `--exact`, `--path <prefiks>`, `--exclude-path <prefiks>` |
 | `list`   | `--json`, `--tag <tag>`, `--path <prefiks>`, `--exclude-path <prefiks>`                                        |
 | `scan`   | `--json`, `--disk` (dołącza ścieżki dyskowe, wyłącznie diagnostycznie)                                         |
+| `log`    | `--zero`, `--days <n>`, `--json` (v2, sekcja 9)                                                                |
 
 **`init <project_name>`:** nazwa podlega tym samym zasadom co `name`. Domyślny cel to `./marian-knows.yml`; istniejący plik nigdy nie jest nadpisywany (kod 2). Polecenie nie modyfikuje `.gitignore` i nie tworzy plików bazy danych.
 
@@ -194,7 +199,7 @@ marian-knows/
    └─ cli.ts        # argumenty i formatowanie wyjścia
 ```
 
-Cała logika (w tym walidacja ścieżek i filtr zakresu) w `core`, CLI jest cienką warstwą. Przyszły MCP może być (A) osobnym procesem wołającym `marian-knows ... --json` albo (B) konsumentem `marian-knows/core`; oba warianty nie wymagają zmian w CLI, a zakres ścieżek jest wtedy parametrem narzędzia.
+Cała logika (w tym walidacja ścieżek i filtr zakresu) w `core`, CLI jest cienką warstwą. Serwer MCP żyje w tym samym repozytorium jako drugi cienki adapter (`src/mcp.ts`) nad tym samym `core`; zakres ścieżek jest parametrem narzędzia. Log zapytań i tokeny też są w `core`, więc CLI i MCP dzielą jedną implementację.
 
 ## 8. Parametry do strojenia
 
@@ -207,3 +212,47 @@ Wartości startowe, bez decyzji z góry; do dostrojenia na zestawie testowym jak
 - Skracanie słów: o 2 litery, minimum 4 znaki.
 
 Pierwsze strojenie (62 zapytania, 28 plików): wagi (od 1/1/1/1 do 20/10/10/1), próg fallbacku (2–10), stop-słowa i rozmiary sekcji zmieniały wynik najwyżej o jedno zapytanie, więc zostały bez zmian. Skracanie było jedyną realną dźwignią: dawna reguła (tylko słowa > 5 znaków) nie łapała odmian 5-literowych słów (`biura`/„biuro”, `hasło`/„hasła”, `marcu`/„marca”); nowa podniosła hit@5 z 96,8% do 100% i MRR z 0,922 do 0,946.
+
+## 9. Serwer MCP (v2)
+
+Cel: baza wiedzy dla agentów AI, wystawiona jako serwer MCP w sieci. Jeden serwer = jeden `marian-knows.yml` = jedna baza. Łączą się różne osoby i różne agenty; wszyscy podłączeni widzą całą bazę. Treści, których nie wolno pokazać wszystkim, idą do osobnej instancji.
+
+**Tylko odczyt.** Wiedza powstaje w plikach `.md` (repozytorium git). Serwer nie tworzy ani nie edytuje plików.
+
+**Bezpieczeństwo treści.** Treść bazy trafia bez zmian do kontekstu agenta. Kto ma prawo zapisu do repozytorium wiedzy, ten może sterować podłączonymi agentami (prompt injection); zapis do repo traktujemy jak uprawnienie administracyjne.
+
+**Odczyt sekcji**
+- `get` przyjmuje `<ścieżka>` albo `<ścieżka>#<kotwica>`; z kotwicą zwraca wszystkie części sekcji o tej kotwicy (nagłówek + treść). Nieznana kotwica to błąd (kod 2).
+- Odpowiedź `get` ma limit znaków (wartość do strojenia); obcięta treść kończy się informacją o obcięciu i sugestią odczytu po kotwicy.
+- `search --json` dostaje pole `heading` (nagłówek najlepszej sekcji, `null` dla sekcji 0). Zmiana zgodna wstecz.
+
+**Narzędzia MCP**
+- `search` (query, limit, tag, path, excludePath, exact), `get` (path, opcjonalnie z `#anchor`), `list` (tag, path, excludePath), `status`.
+- Wyniki w tym samym kształcie co kontrakt `--json` CLI; wyłącznie ścieżki wirtualne.
+- Opisy narzędzi są pisane dla modelu: zapytanie to 2–4 słowa kluczowe, nie pełne zdanie; przy braku wyników ponów z synonimami; czytaj sekcje po kotwicy zamiast całych plików.
+- Transport: stdio (domyślnie, lokalnie) i Streamable HTTP (`serve --http --port <n>`).
+
+**Log zapytań** (wspólny dla CLI i MCP)
+- Pliki `.marian-knows/logs/queries-YYYY-MM-DD.jsonl`, jeden obiekt JSON na linię.
+- Wpis: `ts` (ISO 8601), `source` (`cli` / `mcp`), `who` (`cli` albo nazwa tokenu; `local` dla stdio), `op` (`search` / `get` / `list`), `query`, `filters`, `results` (liczba), `top` (do 5 ścieżek wirtualnych), `ms`.
+- Bez treści odpowiedzi i bez ścieżek dyskowych. Błąd zapisu logu to ostrzeżenie na stderr, nigdy błąd komendy.
+- `MARIAN_KNOWS_NO_LOG=1` wyłącza log.
+- Retencja: przy zapisie usuwane są pliki starsze niż 90 dni (zapytania mogą zawierać dane osobowe).
+- `marian-knows log [--zero] [--days N] [--json]`: przegląd, domyślnie ostatnie 7 dni; `--zero` pokazuje tylko zapytania bez wyników (dziury w bazie, materiał do zestawu jakości).
+
+**Tokeny (HTTP)**
+- Tokeny nieprzezroczyste per osoba, nagłówek `Authorization: Bearer <token>`. Brak lub zły token: 401, wpis do `.marian-knows/logs/access-YYYY-MM-DD.jsonl`.
+- `token add <name>`: generuje `mk_` + 32 losowe bajty (base64url), wypisuje token jeden raz. Zapisywane są tylko: nazwa, SHA-256 tokenu, data utworzenia, data ostatniego użycia. Nazwa unikalna, zasady jak dla `name`.
+- `token list`: nazwy i daty, nigdy tokeny. `token revoke <name>`: token przestaje działać od następnego żądania.
+- Plik `marian-knows.tokens.json` obok `marian-knows.yml`, poza `.marian-knows/` (więc `destroy` nie odbiera dostępu), poza repozytorium wiedzy, dopisywany do `.gitignore` przez użytkownika. `MARIAN_KNOWS_TOKENS` nadpisuje ścieżkę.
+- Porównanie hashy w stałym czasie (`timingSafeEqual`). Limit żądań per token.
+- JWT nie w v2: serwer sam wydaje i sam weryfikuje tokeny, a JWT utrudnia natychmiastowe odwołanie. JWT wchodzi razem z OAuth, jeśli wymaga go klient MCP.
+- Stdio nie wymaga tokenu (proces lokalny).
+
+**Świeżość indeksu**
+- Serwer wykonuje `syncIndex` przy starcie i co N minut; WAL pozwala czytać w trakcie.
+- Opcjonalnie endpoint webhook z sekretem wymuszający synchronizację (np. po `git push`).
+
+**Wdrożenie:** obraz Docker (natywny `better-sqlite3` budowany w obrazie), wolumeny na repozytorium wiedzy, `.marian-knows/` i plik tokenów, HTTPS przez reverse proxy.
+
+**Poza v2:** podział public/internal, wiele baz na serwer, OAuth, wyszukiwanie semantyczne (tylko jeśli pomiary jakości dla zapytań agentowych pokażą potrzebę), zapis przez MCP.

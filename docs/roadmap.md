@@ -115,4 +115,60 @@ Pure functions, no DB.
 - [x] Build check: `npm pack` and run the packed CLI
 - [x] README: install, config, commands, JSON contract
 
-MCP is a separate later project.
+## 9. Core for agents
+
+- [ ] `getSection(path, anchor)` in core; `get` accepts `path#anchor`
+- [ ] `search --json`: add `heading` of the best section
+- [ ] Character limit on `get` output, with a truncation notice
+- [ ] Extend the quality set with ~20 agent-style queries (questions, synonyms); measure only, no tuning
+- [ ] Query log in core (`src/core/log.ts`), shared by CLI and MCP
+  - `.marian-knows/logs/queries-YYYY-MM-DD.jsonl`, one file per day
+  - Entry: `ts`, `source` (`cli` / `mcp`), `who` (`cli` or token name), `op` (`search` / `get` / `list`),
+    query and filters, result count, top 5 virtual paths, duration in ms
+  - No response content, no disk paths; a failed log write is a warning, never a command error
+  - `MARIAN_KNOWS_NO_LOG=1` disables it (tests, scripts)
+  - Files older than 90 days are deleted on write; `destroy` removes logs with the rest of `.marian-knows/`
+- [ ] `log [--zero] [--days N] [--json]` command; `--zero` = queries with no results
+
+## 10. MCP over stdio
+
+- [ ] Ask about and add `@modelcontextprotocol/sdk`
+- [ ] `src/mcp.ts` entry point (same repo, thin adapter over core like `src/cli.ts`)
+- [ ] Tools: `search`, `get` (file or `path#anchor`), `list`, `status`; virtual paths only
+- [ ] Tool descriptions written for the model: 2-4 keywords per query, retry with synonyms, read sections by anchor
+- [ ] Tests: SDK client against a temp-dir knowledge base
+- [ ] Manual check: connect to Claude Code and query a real knowledge base
+
+## 11. Search quality for agents
+
+- [ ] Tune for long natural-language queries (OR fallback threshold, question stop words), measured on the stage 9 set
+- [ ] Decide with numbers whether FTS is enough or semantic search goes on the roadmap
+
+## 12. HTTP transport and auth
+
+- [ ] Streamable HTTP: `serve --http --port <n>`
+- [ ] Per-person opaque tokens, `Authorization: Bearer` (logic in `src/core/tokens.ts`, no new deps)
+  - `token add <name>`: `mk_` + 32 random bytes (base64url), printed once; only SHA-256, name and date stored
+  - `token list`: names, dates, last use; never the tokens
+  - `token revoke <name>`: rejected from the next request on
+  - `marian-knows.tokens.json` next to the config (outside `.marian-knows/`, so `destroy` does not
+    revoke everyone), git-ignored; `MARIAN_KNOWS_TOKENS` overrides the path
+  - Hash comparison with `timingSafeEqual`
+- [ ] Query log `who` = token name; rejected requests (401) go to `access-YYYY-MM-DD.jsonl`
+- [ ] Rate limit per token
+
+## 13. Index freshness
+
+- [ ] `syncIndex` on server start and every N minutes (WAL keeps reads working)
+- [ ] Optional webhook endpoint with a secret to force a sync after `git push`
+
+## 14. Deploy
+
+- [ ] Dockerfile (native `better-sqlite3` built in the image), volumes for the knowledge repo and `.marian-knows/`
+- [ ] HTTPS via reverse proxy, healthcheck
+- [ ] Connection guide: Claude Code, Claude Desktop / claude.ai, custom Agent SDK agents
+
+## Later (not planned)
+
+Public/internal split, multiple knowledge bases per server, OAuth (JWT issued by an auth server),
+semantic search (only if stage 11 shows the need), writing through MCP.
