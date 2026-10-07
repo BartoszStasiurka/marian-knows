@@ -49,7 +49,8 @@ exclude:
 - Kolizja ścieżek różniących się wyłącznie wielkością liter (także w nazwach katalogów, np. `/Notes/x.md` i `/notes/x.md`): wygrywa pierwsza w porządku punktów kodowych, pozostałe są pomijane z ostrzeżeniem.
 
 **Pozostałe**
-- Baza leży w katalogu `.marian-knows/` obok pliku konfiguracyjnego (`index.db`, `-wal`, `-shm`), lokalizacji nie da się zmienić. Katalog powstaje przy pierwszym indeksowaniu; jako ukryty nigdy nie jest skanowany. Jedno `marian-knows.yml` = jedna baza; treści publiczne i wewnętrzne rozdziela się w v1 osobnymi `marian-knows.yml`.
+- Baza leży w katalogu `.marian-knows/<nazwa>/` obok pliku konfiguracyjnego, gdzie `<nazwa>` to nazwa pliku konfiguracji bez rozszerzenia (`marian-knows.yml` → `.marian-knows/marian-knows/index.db`, `-wal`, `-shm`; tam też blokada i logi). Lokalizacji nie da się zmienić. Katalog powstaje przy pierwszym indeksowaniu; jako ukryty nigdy nie jest skanowany. Jeden plik konfiguracji = jedna baza, więc w jednym katalogu może leżeć kilka konfiguracji (np. `publiczna.yml` i `wewnetrzna.yml`) z osobnymi bazami; tak w v1 rozdziela się treści publiczne i wewnętrzne.
+- Stara baza `.marian-knows/index.db` (sprzed katalogów per konfiguracja) nie jest czytana: `index` buduje nową i ostrzega, że starą można usunąć. Nic nie jest usuwane automatycznie.
 - Wybór konfiguracji: `--config <plik>`, potem `MARIAN_KNOWS_CONFIG`, potem `marian-knows.yml` szukany w górę od bieżącego katalogu. Wyjątek: `init` używa tylko `--config` albo `./marian-knows.yml`.
 
 ## 4. Indeks
@@ -94,7 +95,7 @@ CREATE VIRTUAL TABLE sections_fts USING fts5(         -- rowid = sections.id
 **Pełna przebudowa:** przy niezgodności `schema_version` (schemat, tokenizer, parser sekcji) albo ręcznie `marian-knows index --full`.
 
 **Odporność i współbieżność:** WAL (`search` działa w trakcie `index`), blokada przed równoległymi `index`, nieczytelny plik to ostrzeżenie i kontynuacja. `status` pokazuje wiek indeksu.
-- Blokada to plik `.marian-knows/index.lock` z PID właściciela, zakładany atomowo i usuwany po zakończeniu. Gdy trzyma go żywy proces, `index` kończy się błędem `index is already running (pid N)` (kod 2); blokada po martwym procesie jest przejmowana.
+- Blokada to plik `index.lock` w katalogu bazy (`.marian-knows/<nazwa>/`) z PID właściciela, zakładany atomowo i usuwany po zakończeniu. Gdy trzyma go żywy proces, `index` kończy się błędem `index is already running (pid N)` (kod 2); blokada po martwym procesie jest przejmowana.
 - Plik, którego nie da się odczytać, jest traktowany jak nieobecny: jego poprzednia wersja znika z indeksu. Plik bez zmian `mtime` i `size` nie jest czytany, więc zostaje.
 - Błąd w trakcie synchronizacji wycofuje całą transakcję; indeks zostaje w poprzednim stanie.
 
@@ -127,7 +128,7 @@ marian-knows search <query> [opcje]   # pliki wg rankingu
 marian-knows list [opcje]             # pliki z indeksu, posortowane po ścieżce
 marian-knows get <path>[#anchor]      # zawartość pliku albo jednej sekcji z indeksu (ścieżka wirtualna)
 marian-knows status [--json]          # stan projektu: konfiguracja, liczba plików i sekcji, rozmiar, czas i wiek indeksu
-marian-knows destroy                  # usuwa indeks i logi (katalog .marian-knows/); konfiguracja zostaje
+marian-knows destroy                  # usuwa indeks i logi tej konfiguracji (.marian-knows/<nazwa>/); konfiguracja zostaje
 marian-knows log [opcje]              # przegląd logu zapytań
 marian-knows serve [--http --port <n>] # v2: serwer MCP (domyślnie stdio; --http od etapu 12)
 marian-knows token add|list|revoke    # v2: tokeny dostępu do serwera HTTP
@@ -152,7 +153,7 @@ Opcja globalna: `--config <plik>` (dla `init`: plik, który ma zostać utworzony
 
 **`status`:** nazwa projektu, ścieżka pliku konfiguracji i katalogu źródłowego (diagnostycznie), `exclude`, stan indeksu (`ok`, `missing`, `outdated`), liczba plików i sekcji, rozmiar bazy (`index.db` z `-wal` i `-shm`), czas i wiek indeksowania. Brak indeksu nie jest błędem (kod 0).
 
-**`destroy`:** usuwa katalog `.marian-knows/`. Pliki `.md` i `marian-knows.yml` zostają. Odmawia (kod 2), gdy trwa `index`. Brak indeksu to kod 0 i komunikat `No index to remove`.
+**`destroy`:** usuwa katalog `.marian-knows/<nazwa>/` tej konfiguracji, a `.marian-knows/` tylko wtedy, gdy zostanie pusty; bazy innych konfiguracji zostają. Pliki `.md` i pliki konfiguracji zostają. Odmawia (kod 2), gdy trwa `index`. Brak indeksu to kod 0 i komunikat `No index to remove`.
 
 **Język komunikatów:** wszystkie komunikaty CLI (pomoc, podsumowania, ostrzeżenia `! warning:`, błędy `error:`) są po angielsku.
 
@@ -240,7 +241,7 @@ Cel: baza wiedzy dla agentów AI, wystawiona jako serwer MCP w sieci. Jeden serw
 - Transport: stdio (domyślnie, lokalnie) i Streamable HTTP (`serve --http --port <n>`).
 
 **Log zapytań** (wspólny dla CLI i MCP)
-- Pliki `.marian-knows/logs/queries-YYYY-MM-DD.jsonl`, jeden obiekt JSON na linię.
+- Pliki `.marian-knows/<nazwa>/logs/queries-YYYY-MM-DD.jsonl`, jeden obiekt JSON na linię.
 - Plik dzienny według daty UTC z `ts`.
 - Wpis: `ts` (ISO 8601, UTC), `source` (`cli` / `mcp`), `who` (`cli` albo nazwa tokenu; `local` dla stdio), `op` (`search` / `get` / `list`), `query` (zapytanie albo `ścieżka#kotwica` dla `get`; `null` dla `list`), `filters` (tylko podane: `tag`, `paths`, `excludePaths`, `limit`, `exact`), `results` (liczba plików; `get`: 1), `top` (do 5 ścieżek wirtualnych), `ms`.
 - Logowane są wywołania zakończone sukcesem, także bez wyników; błędy (zła ścieżka, brak pliku, brak indeksu) nie.
@@ -250,10 +251,10 @@ Cel: baza wiedzy dla agentów AI, wystawiona jako serwer MCP w sieci. Jeden serw
 - `marian-knows log [--zero] [--days N] [--json]`: przegląd, domyślnie ostatnie 7 dni (N × 24 h wstecz), od najstarszych; `--zero` pokazuje tylko zapytania bez wyników (dziury w bazie, materiał do zestawu jakości). Domyślnie jedna linia na wpis (czas UTC, `who`, `op`, liczba wyników, zapytanie, filtry jako JSON); `--json` to goła tablica wpisów. Pusty log: kod 1 (`[]` z `--json`). Uszkodzone linie są pomijane z ostrzeżeniem. `log` nie wymaga indeksu.
 
 **Tokeny (HTTP)**
-- Tokeny nieprzezroczyste per osoba, nagłówek `Authorization: Bearer <token>`. Brak lub zły token: 401, wpis do `.marian-knows/logs/access-YYYY-MM-DD.jsonl`.
+- Tokeny nieprzezroczyste per osoba, nagłówek `Authorization: Bearer <token>`. Brak lub zły token: 401, wpis do `.marian-knows/<nazwa>/logs/access-YYYY-MM-DD.jsonl`.
 - `token add <name>`: generuje `mk_` + 32 losowe bajty (base64url), wypisuje token jeden raz. Zapisywane są tylko: nazwa, SHA-256 tokenu, data utworzenia, data ostatniego użycia. Nazwa unikalna, zasady jak dla `name`.
 - `token list`: nazwy i daty, nigdy tokeny. `token revoke <name>`: token przestaje działać od następnego żądania.
-- Plik `marian-knows.tokens.json` obok `marian-knows.yml`, poza `.marian-knows/` (więc `destroy` nie odbiera dostępu), poza repozytorium wiedzy, dopisywany do `.gitignore` przez użytkownika. `MARIAN_KNOWS_TOKENS` nadpisuje ścieżkę.
+- Plik `<nazwa>.tokens.json` obok pliku konfiguracji (`marian-knows.yml` → `marian-knows.tokens.json`; każda konfiguracja ma własne tokeny), poza `.marian-knows/` (więc `destroy` nie odbiera dostępu), poza repozytorium wiedzy, dopisywany do `.gitignore` przez użytkownika. `MARIAN_KNOWS_TOKENS` nadpisuje ścieżkę.
 - Porównanie hashy w stałym czasie (`timingSafeEqual`). Limit żądań per token.
 - JWT nie w v2: serwer sam wydaje i sam weryfikuje tokeny, a JWT utrudnia natychmiastowe odwołanie. JWT wchodzi razem z OAuth, jeśli wymaga go klient MCP.
 - Stdio nie wymaga tokenu (proces lokalny).

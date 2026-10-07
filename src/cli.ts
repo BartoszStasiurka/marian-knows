@@ -7,6 +7,7 @@ import {
   destroyIndex,
   findConfig,
   get as getRef,
+  indexDirName,
   initConfig,
   list as listIndex,
   loadConfig,
@@ -32,12 +33,12 @@ Commands:
   init <project_name>   Create a minimal marian-knows.yml (never overwrites)
   scan                  Scan the source directory and print virtual paths (dry run, no index)
   parse <file>          Parse a Markdown file given by disk path (diagnostic, no config needed)
-  index [--full]        Sync the index (.marian-knows/index.db next to the config)
+  index [--full]        Sync the index (.marian-knows/<config name>/ next to the config)
   search <query>        Search the index, one virtual path per line (exit 1: no results)
   list                  List indexed files sorted by path (exit 1: no files)
   get <path>[#anchor]   Print an indexed file, or one section of it, by virtual path
   status                Show project, config and index state
-  destroy               Remove the index and query logs (.marian-knows/); the config stays
+  destroy               Remove this config's index and query logs; the config stays
   log                   Show the query log (search, get, list), last 7 days
   serve                 Run the MCP server over stdio (tools: search, get, list, status)
   help                  Show this help
@@ -293,7 +294,7 @@ function status(values: { config?: string; json?: boolean }): number {
 function destroy(values: { config?: string }): number {
   const config = requireConfig(values.config);
   if (!config) return 2;
-  console.log(destroyIndex(config) ? "Removed the index (.marian-knows/)" : "No index to remove");
+  console.log(destroyIndex(config) ? `Removed the index (${indexDirName(config)}/)` : "No index to remove");
   return 0;
 }
 

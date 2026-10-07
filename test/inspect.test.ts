@@ -229,7 +229,7 @@ describe("destroyIndex", () => {
 
   it("refuses while a live index run holds the lock", async () => {
     const { dir, config } = await indexed({ "a.md": "a" });
-    writeFileSync(path.join(dir, ".marian-knows", "index.lock"), String(process.pid));
+    writeFileSync(path.join(dir, ".marian-knows", "marian-knows", "index.lock"), String(process.pid));
     expect(() => destroyIndex(config)).toThrow(IndexLockedError);
     expect(existsSync(indexPath(config))).toBe(true);
   });

@@ -32,7 +32,7 @@ script compiles it and needs a C++ toolchain. If your npm asks you to approve in
 ```bash
 cd ~/notes
 marian-knows init "My notes"     # creates ./marian-knows.yml (never overwrites)
-marian-knows index               # builds .marian-knows/index.db next to the config
+marian-knows index               # builds .marian-knows/marian-knows/index.db next to the config
 marian-knows search backup postgres --snippets
 marian-knows get /ops/backup.md
 marian-knows get /ops/backup.md#restore   # one section, by the anchor search returned
@@ -57,7 +57,9 @@ exclude:                        # optional, a glob or a list of globs relative t
 - A missing `path` directory is a warning, not an error.
 
 Config lookup: `--config <file>`, then `MARIAN_KNOWS_CONFIG`, then `marian-knows.yml` searched upwards from the
-current directory. The index lives in `.marian-knows/index.db` next to the config.
+current directory. The index lives in `.marian-knows/<config file name without extension>/` next to the config
+(`marian-knows.yml` → `.marian-knows/marian-knows/index.db`), so several configs in one directory, e.g.
+`public.yml` and `internal.yml`, keep separate indexes and logs.
 
 ### Virtual paths
 
@@ -77,7 +79,7 @@ in diagnostics (`scan --disk`, `status`).
 | `list`                | Indexed files sorted by path                                                      |
 | `get <path>[#anchor]` | Print an indexed file unchanged, or one section of it                             |
 | `status`              | Project, config and index state (`--json`)                                        |
-| `destroy`             | Remove `.marian-knows/` (index and query logs); the config and `.md` files stay   |
+| `destroy`             | Remove this config's index and query logs; the config and `.md` files stay        |
 | `log`                 | Show the query log (`--days`, `--zero`, `--json`)                                 |
 | `serve`               | Run the MCP server over stdio for AI agents                                       |
 | `help`                | Show help (also `--help`, `-h`)                                                   |
@@ -115,7 +117,7 @@ marian-knows search "pg_restore" --exact
 
 ### Query log
 
-`search`, `get` and `list` append one JSON line per call to `.marian-knows/logs/queries-YYYY-MM-DD.jsonl`
+`search`, `get` and `list` append one JSON line per call to `.marian-knows/<config name>/logs/queries-YYYY-MM-DD.jsonl`
 (UTC day): time, source, who, operation, query, filters, result count, top 5 virtual paths, duration. No
 response content and no disk paths. Files older than 90 days are deleted on write; `destroy` removes the
 logs with the index. A failed write is a warning, never an error. `MARIAN_KNOWS_NO_LOG=1` turns the log off.

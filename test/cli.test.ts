@@ -191,7 +191,7 @@ describe.concurrent("index", () => {
     expect(r.code).toBe(0);
     expect(r.stdout).toMatch(/^Files: 2\n\+ 2 added, ~ 0 changed, - 0 removed \(\d+\.\d s\)\n$/);
     expect(r.stderr).toBe("");
-    expect(readdirSync(path.join(dir, ".marian-knows"))).toContain("index.db");
+    expect(readdirSync(path.join(dir, ".marian-knows", "marian-knows"))).toContain("index.db");
   });
 
   it("reports changes on the next run and warnings on stderr", async () => {
@@ -215,7 +215,7 @@ describe.concurrent("index", () => {
 
   it("fails with exit 2 while another index run holds the lock", async () => {
     // The test runner's own pid is alive for the whole subprocess run.
-    const dir = makeTree({ "marian-knows.yml": "name: P\n", "a.md": "a", ".marian-knows/index.lock": String(process.pid) });
+    const dir = makeTree({ "marian-knows.yml": "name: P\n", "a.md": "a", ".marian-knows/marian-knows/index.lock": String(process.pid) });
     const r = await runCli(["index"], { cwd: dir });
     expect(r.code).toBe(2);
     expect(r.stderr).toBe(`error: index is already running (pid ${process.pid})\n`);
@@ -520,8 +520,8 @@ describe.concurrent("query log", () => {
     expect(entries[1]).toMatchObject({ filters: {}, top: ["/a.md"], ms: expect.any(Number) });
     expect(entries[3].filters).toEqual({ paths: ["/a.md"] });
     // No disk paths in the log.
-    const raw = readdirSync(path.join(dir, ".marian-knows", "logs")).map((f) =>
-      readFileSync(path.join(dir, ".marian-knows", "logs", f), "utf8"),
+    const raw = readdirSync(path.join(dir, ".marian-knows", "marian-knows", "logs")).map((f) =>
+      readFileSync(path.join(dir, ".marian-knows", "marian-knows", "logs", f), "utf8"),
     );
     expect(raw.join("")).not.toContain(dir);
 
@@ -533,7 +533,7 @@ describe.concurrent("query log", () => {
   it("MARIAN_KNOWS_NO_LOG=1 leaves no log; empty log: exit 1 ([] with --json)", async () => {
     const dir = await project();
     await runCli(["search", "backup"], { cwd: dir });
-    expect(existsSync(path.join(dir, ".marian-knows", "logs"))).toBe(false);
+    expect(existsSync(path.join(dir, ".marian-knows", "marian-knows", "logs"))).toBe(false);
     expect(await runCli(["log"], { cwd: dir })).toMatchObject({ code: 1, stdout: "", stderr: "" });
     expect(await runCli(["log", "--json", "--days", "30"], { cwd: dir })).toMatchObject({ code: 1, stdout: "[]\n" });
   });
@@ -548,7 +548,7 @@ describe.concurrent("query log", () => {
   it("destroy removes the logs with the index", async () => {
     const dir = await project();
     await runCli(["search", "backup"], { cwd: dir, log: true });
-    expect(existsSync(path.join(dir, ".marian-knows", "logs"))).toBe(true);
+    expect(existsSync(path.join(dir, ".marian-knows", "marian-knows", "logs"))).toBe(true);
     expect((await runCli(["destroy"], { cwd: dir })).code).toBe(0);
     expect(existsSync(path.join(dir, ".marian-knows"))).toBe(false);
   });
@@ -604,16 +604,16 @@ describe.concurrent("destroy", () => {
     const dir = makeTree({ "marian-knows.yml": "name: P\n", "a.md": "# A" });
     expect((await runCli(["index"], { cwd: dir })).code).toBe(0);
     const r = await runCli(["destroy"], { cwd: dir });
-    expect(r).toMatchObject({ code: 0, stdout: "Removed the index (.marian-knows/)\n", stderr: "" });
+    expect(r).toMatchObject({ code: 0, stdout: "Removed the index (.marian-knows/marian-knows/)\n", stderr: "" });
     expect(snapshot(dir)).toEqual({ "marian-knows.yml": "name: P\n", "a.md": "# A" });
     expect(await runCli(["destroy"], { cwd: dir })).toMatchObject({ code: 0, stdout: "No index to remove\n" });
   });
 
   it("refuses while index is running: exit 2, nothing removed", async () => {
-    const dir = makeTree({ "marian-knows.yml": "name: P\n", ".marian-knows/index.lock": String(process.pid) });
+    const dir = makeTree({ "marian-knows.yml": "name: P\n", ".marian-knows/marian-knows/index.lock": String(process.pid) });
     const r = await runCli(["destroy"], { cwd: dir });
     expect(r).toMatchObject({ code: 2, stderr: `error: index is already running (pid ${process.pid})\n` });
-    expect(snapshot(dir)).toEqual({ "marian-knows.yml": "name: P\n", [path.join(".marian-knows", "index.lock")]: String(process.pid) });
+    expect(snapshot(dir)).toEqual({ "marian-knows.yml": "name: P\n", [path.join(".marian-knows", "marian-knows", "index.lock")]: String(process.pid) });
   });
 });
 
@@ -635,7 +635,7 @@ describe.concurrent("exit codes", () => {
   );
 
   it("a broken index database is exit 2, not a crash with exit 1", async () => {
-    const dir = makeTree({ "marian-knows.yml": "name: P\n", ".marian-knows/index.db": "not a database" });
+    const dir = makeTree({ "marian-knows.yml": "name: P\n", ".marian-knows/marian-knows/index.db": "not a database" });
     for (const args of [["search", "a"], ["list"], ["get", "/a.md"]]) {
       expect((await runCli(args, { cwd: dir })).code).toBe(2);
     }

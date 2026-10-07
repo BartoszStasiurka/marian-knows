@@ -142,6 +142,8 @@ Pure functions, no DB.
 - [x] Tool descriptions written for the model: 2-4 keywords per query, retry with synonyms, read sections by anchor
 - [x] Tests: SDK client against a temp-dir knowledge base
 - [ ] Manual check: connect to Claude Code and query a real knowledge base
+- [x] Index directory per config: `.marian-knows/<config name>/`, so several configs share a directory;
+  `destroy` removes only its own; an old `.marian-knows/index.db` gets a warning
 
 ## 11. Search quality for agents
 
@@ -168,7 +170,7 @@ Pure functions, no DB.
   - `token add <name>`: `mk_` + 32 random bytes (base64url), printed once; only SHA-256, name and date stored
   - `token list`: names, dates, last use; never the tokens
   - `token revoke <name>`: rejected from the next request on
-  - `marian-knows.tokens.json` next to the config (outside `.marian-knows/`, so `destroy` does not
+  - `<config name>.tokens.json` next to the config (outside `.marian-knows/`, so `destroy` does not
     revoke everyone), git-ignored; `MARIAN_KNOWS_TOKENS` overrides the path
   - Hash comparison with `timingSafeEqual`
 - [ ] Query log `who` = token name; rejected requests (401) go to `access-YYYY-MM-DD.jsonl`

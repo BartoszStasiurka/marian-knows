@@ -37,6 +37,7 @@ export {
   acquireIndexLock,
   destroyIndex,
   indexDir,
+  indexDirName,
   indexPath,
   openIndex,
   openIndexReadonly,

@@ -7,6 +7,7 @@ import {
   LOCK_FILENAME,
   SCHEMA_VERSION,
   acquireIndexLock,
+  destroyIndex,
   indexPath,
   loadConfig,
   rebuildIndex,
@@ -31,10 +32,10 @@ function query<T>(dbFile: string, sql: string, ...params: unknown[]): T[] {
 const LONG = "Lorem ipsum dolor sit amet. ".repeat(10);
 
 describe("rebuildIndex", () => {
-  it("creates .marian-knows/index.db next to the config in WAL mode", async () => {
+  it("creates .marian-knows/<config name>/index.db next to the config in WAL mode", async () => {
     const { dir, config } = project({ "a.md": "# A" });
     await rebuildIndex(config);
-    const file = path.join(dir, ".marian-knows", "index.db");
+    const file = path.join(dir, ".marian-knows", "marian-knows", "index.db");
     expect(indexPath(config)).toBe(file);
     expect(existsSync(file)).toBe(true);
     expect(query<{ journal_mode: string }>(file, "PRAGMA journal_mode")[0]!.journal_mode).toBe("wal");
@@ -305,12 +306,38 @@ describe("syncIndex", () => {
     exec(indexPath(config), "CREATE TRIGGER boom BEFORE INSERT ON sections BEGIN SELECT RAISE(ABORT, 'boom'); END;");
     await expect(syncIndex(config)).rejects.toThrow("boom");
     expect(query(indexPath(config), "SELECT path FROM docs")).toEqual([{ path: "/a.md" }]);
-    expect(existsSync(path.join(dir, ".marian-knows", LOCK_FILENAME))).toBe(false);
+    expect(existsSync(path.join(dir, ".marian-knows", "marian-knows", LOCK_FILENAME))).toBe(false);
+  });
+});
+
+describe("index directory per config", () => {
+  it("keeps two configs in one directory apart; destroy removes only its own", async () => {
+    const dir = makeTree({ "a/x.md": "# X", "b/y.md": "# Y", "a.yaml": "name: A\npath: ./a\n", "b.yml": "name: B\npath: ./b\n" });
+    const a = loadConfig(path.join(dir, "a.yaml"));
+    const b = loadConfig(path.join(dir, "b.yml"));
+    await syncIndex(a);
+    await syncIndex(b);
+    expect(indexPath(a)).toBe(path.join(dir, ".marian-knows", "a", "index.db"));
+    expect(query(indexPath(a), "SELECT path FROM docs")).toEqual([{ path: "/x.md" }]);
+    expect(query(indexPath(b), "SELECT path FROM docs")).toEqual([{ path: "/y.md" }]);
+
+    expect(destroyIndex(a)).toBe(true);
+    expect(existsSync(indexPath(b))).toBe(true);
+    expect(destroyIndex(b)).toBe(true);
+    expect(existsSync(path.join(dir, ".marian-knows"))).toBe(false);
+  });
+
+  it("warns about an old index in .marian-knows/index.db and leaves it alone", async () => {
+    const { dir, config } = project({ "a.md": "a", ".marian-knows/index.db": "old" });
+    const { warnings } = await syncIndex(config);
+    expect(warnings).toEqual([expect.stringContaining(".marian-knows/index.db is an old index no longer used")]);
+    expect(destroyIndex(config)).toBe(true);
+    expect(readFileSync(path.join(dir, ".marian-knows", "index.db"), "utf8")).toBe("old");
   });
 });
 
 describe("index lock", () => {
-  const lockFile = (dir: string) => path.join(dir, ".marian-knows", LOCK_FILENAME);
+  const lockFile = (dir: string) => path.join(dir, ".marian-knows", "marian-knows", LOCK_FILENAME);
 
   it("refuses to run while another live process holds the lock", async () => {
     const { dir, config } = project({ "a.md": "a" });
@@ -327,7 +354,7 @@ describe("index lock", () => {
   });
 
   it("takes over a lock left by a dead process", async () => {
-    const { dir, config } = project({ "a.md": "a", ".marian-knows/index.lock": "999999999" });
+    const { dir, config } = project({ "a.md": "a", ".marian-knows/marian-knows/index.lock": "999999999" });
     expect(await syncIndex(config)).toMatchObject({ files: 1 });
     expect(existsSync(lockFile(dir))).toBe(false);
   });

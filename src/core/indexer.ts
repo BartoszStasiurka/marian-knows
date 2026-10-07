@@ -1,6 +1,16 @@
 import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, unlinkSync, writeSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  rmdirSync,
+  rmSync,
+  unlinkSync,
+  writeSync,
+} from "node:fs";
 import path from "node:path";
 import { IndexLockedError, IndexMissingError } from "./errors.js";
 import { fold } from "./fold.js";
@@ -39,12 +49,20 @@ DROP TABLE IF EXISTS docs;
 DROP TABLE IF EXISTS meta;
 `;
 
-/** Disk path of the index directory: `.marian-knows/` next to the config file. */
-export function indexDir(config: LoadedConfig): string {
-  return path.join(config.configDir, INDEX_DIRNAME);
+/** Index directory relative to the config's directory: `.marian-knows/<config file name without extension>`. */
+export function indexDirName(config: LoadedConfig): string {
+  return `${INDEX_DIRNAME}/${path.parse(config.configPath).name}`;
 }
 
-/** Disk path of the index database for a config: `.marian-knows/index.db` next to the config file. */
+/**
+ * Disk path of the index directory: `.marian-knows/<config name>/` next to the config file, so several
+ * configs in one directory (`a.yml`, `b.yml`) keep separate indexes, locks and logs.
+ */
+export function indexDir(config: LoadedConfig): string {
+  return path.join(config.configDir, indexDirName(config));
+}
+
+/** Disk path of the index database for a config: `.marian-knows/<config name>/index.db`. */
 export function indexPath(config: LoadedConfig): string {
   return path.join(indexDir(config), INDEX_FILENAME);
 }
@@ -71,8 +89,9 @@ export function openIndexReadonly(config: LoadedConfig): Database.Database {
 }
 
 /**
- * Removes the `.marian-knows/` directory (database, WAL files, lock). Refuses while a live `index` run
- * holds the lock. Returns false when there was nothing to remove. The config file stays.
+ * Removes this config's index directory (database, WAL files, lock, logs) and `.marian-knows/` when it is
+ * left empty; indexes of other configs stay. Refuses while a live `index` run holds the lock.
+ * Returns false when there was nothing to remove. The config file stays.
  */
 export function destroyIndex(config: LoadedConfig): boolean {
   const dir = indexDir(config);
@@ -80,7 +99,21 @@ export function destroyIndex(config: LoadedConfig): boolean {
   // Taken, never released: the lock file goes away with the directory.
   acquireIndexLock(config);
   rmSync(dir, { recursive: true, force: true });
+  try {
+    rmdirSync(path.dirname(dir));
+  } catch {
+    // Not empty (another config's index, an old index): it stays.
+  }
   return true;
+}
+
+/** Warning for an index from before per-config directories (`.marian-knows/index.db`), which nothing reads. */
+function legacyIndexWarning(config: LoadedConfig): string[] {
+  if (!existsSync(path.join(config.configDir, INDEX_DIRNAME, INDEX_FILENAME))) return [];
+  return [
+    `${INDEX_DIRNAME}/${INDEX_FILENAME} is an old index no longer used (this config's index: ` +
+      `${indexDirName(config)}/); delete it with its -wal, -shm files and ${INDEX_DIRNAME}/logs/`,
+  ];
 }
 
 /** Opens (and creates, if needed) the index database in WAL mode with the schema in place. */
@@ -105,7 +138,7 @@ function isAlive(pid: number): boolean {
 }
 
 /**
- * Takes `.marian-knows/index.lock` (holds the owner's pid). A lock left by a dead process is taken over.
+ * Takes `index.lock` in the index directory (holds the owner's pid). A lock left by a dead process is taken over.
  * Throws IndexLockedError when a live process holds it. Returns the release function.
  */
 export function acquireIndexLock(config: LoadedConfig): () => void {
@@ -167,7 +200,7 @@ export async function syncIndex(config: LoadedConfig, options: IndexOptions = {}
     const { files, warnings } = await scanSource(config);
     const db = openIndex(config);
     try {
-      return sync(db, files, warnings, options.full ?? false);
+      return sync(db, files, [...warnings, ...legacyIndexWarning(config)], options.full ?? false);
     } finally {
       db.close();
     }
