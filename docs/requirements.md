@@ -137,8 +137,8 @@ marian-knows get <path>[#anchor]      # zawartość pliku albo jednej sekcji z i
 marian-knows status [--json]          # stan projektu: konfiguracja, liczba plików i sekcji, rozmiar, czas i wiek indeksu
 marian-knows destroy                  # usuwa indeks i logi tej konfiguracji (.marian-knows/<nazwa>/); konfiguracja zostaje
 marian-knows log [opcje]              # przegląd logu zapytań
-marian-knows serve [--http --port <n>] # v2: serwer MCP (domyślnie stdio; --http od etapu 12)
-marian-knows token add|list|revoke    # v2: tokeny dostępu do serwera HTTP
+marian-knows serve [--http [--port <n>] [--host <addr>]] # serwer MCP (domyślnie stdio)
+marian-knows token add|list|revoke    # tokeny dostępu do serwera HTTP
 marian-knows help                     # pomoc (także --help)
 ```
 
@@ -151,6 +151,8 @@ Opcja globalna: `--config <plik>` (dla `init`: plik, który ma zostać utworzony
 | `scan`   | `--json`, `--disk` (dołącza ścieżki dyskowe, wyłącznie diagnostycznie)                                         |
 | `get`    | `--max-chars <n>` (limit znaków odpowiedzi, `0` = bez limitu; sekcja 9)                                        |
 | `log`    | `--zero`, `--days <n>`, `--json` (sekcja 9)                                                                    |
+| `serve`  | `--http`, `--port <n>` (domyślnie 3000, `0` = dowolny wolny), `--host <adres>` (domyślnie `127.0.0.1`) (sekcja 9) |
+| `token`  | `list --json` (sekcja 9)                                                                                       |
 
 **`init <project_name>`:** nazwa podlega tym samym zasadom co `name`. Domyślny cel to `./marian-knows.yml`; istniejący plik nigdy nie jest nadpisywany (kod 2). Polecenie nie modyfikuje `.gitignore` i nie tworzy plików bazy danych.
 
@@ -247,6 +249,7 @@ Cel: baza wiedzy dla agentów AI, wystawiona jako serwer MCP w sieci. Jeden serw
 - Opis `search` też zaczyna się od `name` i `description`, bo nie każdy klient przekazuje modelowi `instructions`.
 - Opisy narzędzi są pisane dla modelu: zapytanie to 2–4 słowa kluczowe, nie pełne zdanie; przy braku wyników ponów z synonimami; czytaj sekcje po kotwicy zamiast całych plików.
 - Transport: stdio (domyślnie, lokalnie) i Streamable HTTP (`serve --http --port <n>`).
+- HTTP: jeden endpoint `/mcp`, inne ścieżki to 404 (bez sprawdzania tokenu). Domyślnie `127.0.0.1:3000`; `--host 0.0.0.0` dla kontenera. Odpowiedzi JSON zamiast strumienia SSE. Każde żądanie `initialize` bez `Mcp-Session-Id` otwiera nową sesję; sesja należy do tokenu, który ją otworzył (inny token dostaje 404, jak dla nieznanej sesji). Sesja kończy się na `DELETE` albo po 30 minutach bez żądań (klient zaczyna wtedy nową). SIGINT / SIGTERM zamyka wszystkie sesje (z `disconnect`) i zapisuje daty użycia tokenów. Adres endpointu idzie na stderr.
 
 **Log zapytań** (wspólny dla CLI i MCP)
 - Pliki `.marian-knows/<nazwa>/logs/queries-YYYY-MM-DD.jsonl`, jeden obiekt JSON na linię.
@@ -260,12 +263,12 @@ Cel: baza wiedzy dla agentów AI, wystawiona jako serwer MCP w sieci. Jeden serw
 - `marian-knows log [--zero] [--days N] [--json]`: przegląd, domyślnie ostatnie 7 dni (N × 24 h wstecz), od najstarszych; `--zero` pokazuje tylko zapytania bez wyników (dziury w bazie, materiał do zestawu jakości), bez wpisów sesji. Domyślnie jedna linia na wpis (czas UTC, `who`, `op`, liczba wyników, zapytanie, filtry jako JSON; dla sesji: klient, a przy `disconnect` liczba wywołań i czas trwania); `--json` to goła tablica wpisów. Pusty log: kod 1 (`[]` z `--json`). Uszkodzone linie są pomijane z ostrzeżeniem. `log` nie wymaga indeksu.
 
 **Tokeny (HTTP)**
-- Tokeny nieprzezroczyste per osoba, nagłówek `Authorization: Bearer <token>`. Brak lub zły token: 401, wpis do `.marian-knows/<nazwa>/logs/access-YYYY-MM-DD.jsonl`.
-- `token add <name>`: generuje `mk_` + 32 losowe bajty (base64url), wypisuje token jeden raz. Zapisywane są tylko: nazwa, SHA-256 tokenu, data utworzenia, data ostatniego użycia. Nazwa unikalna, zasady jak dla `name`.
-- `token list`: nazwy i daty, nigdy tokeny. `token revoke <name>`: token przestaje działać od następnego żądania.
+- Tokeny nieprzezroczyste per osoba, nagłówek `Authorization: Bearer <token>`. Brak lub zły token: 401 z `WWW-Authenticate: Bearer`, wpis do `.marian-knows/<nazwa>/logs/access-YYYY-MM-DD.jsonl`: `{ts, status: 401, reason, ip, forwardedFor?, method, path, userAgent}`, gdzie `reason` to `missing` (brak nagłówka), `malformed` (nie `Bearer <token>`) albo `unknown` (nieznany lub odwołany token); nigdy sam token. Log dostępu nie jest wyłączany przez `MARIAN_KNOWS_NO_LOG` i podlega tej samej retencji co log zapytań.
+- `token add <name>`: generuje `mk_` + 32 losowe bajty (base64url), wypisuje token jeden raz (sam token na stdout, komunikat na stderr). Zapisywane są tylko: nazwa, SHA-256 tokenu, data utworzenia, data ostatniego użycia. Nazwa unikalna, zasady jak dla `name`; duplikat to kod 2.
+- `token list`: nazwy i daty, nigdy tokeny; `--json` to goła tablica `{name, createdAt, lastUsedAt}`; brak tokenów to kod 1. `token revoke <name>`: token przestaje działać od następnego żądania, także w otwartej sesji; nieznana nazwa to kod 2. Serwer czyta plik ponownie, gdy ten zmieni się na dysku, więc `add` i `revoke` nie wymagają restartu.
 - Plik `<nazwa>.tokens.json` obok pliku konfiguracji (`marian-knows.yml` → `marian-knows.tokens.json`; każda konfiguracja ma własne tokeny), poza `.marian-knows/` (więc `destroy` nie odbiera dostępu), poza repozytorium wiedzy, dopisywany do `.gitignore` przez użytkownika. `MARIAN_KNOWS_TOKENS` nadpisuje ścieżkę.
 - Porównanie hashy w stałym czasie (`timingSafeEqual`).
-- Plik tokenów ma pole `version: 1` i jest zapisywany atomowo (plik tymczasowy + `rename`). Data ostatniego użycia trzymana w pamięci i zapisywana najwyżej raz na minutę.
+- Plik tokenów ma pole `version: 1` i jest zapisywany atomowo (plik tymczasowy + `rename`, uprawnienia `0600`). Każda zmiana (odczyt, modyfikacja, zapis) odbywa się pod blokadą `<plik>.lock`, bo `token add` i zapis dat użycia przez serwer mogłyby nadpisać sobie zmiany; blokada starsza niż 10 s jest porzucona. Inna wersja albo uszkodzony plik: `token` kończy się kodem 2, a serwer odrzuca wszystkie żądania (z ostrzeżeniem), dopóki plik nie zostanie naprawiony. Data ostatniego użycia trzymana w pamięci i zapisywana najwyżej raz na minutę.
 - JWT nie w v2: serwer sam wydaje i sam weryfikuje tokeny, a JWT utrudnia natychmiastowe odwołanie. JWT wchodzi razem z OAuth, jeśli wymaga go klient MCP.
 - Stdio nie wymaga tokenu (proces lokalny).
 

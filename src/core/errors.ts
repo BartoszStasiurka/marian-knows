@@ -55,3 +55,11 @@ export class DocNotFoundError extends Error {
     this.path = path;
   }
 }
+
+/** Tokens file problem (unreadable, other version, broken) or a bad `token` command (duplicate, unknown name). */
+export class TokenError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TokenError";
+  }
+}

@@ -646,6 +646,62 @@ describe.concurrent("destroy", () => {
   });
 });
 
+describe.concurrent("token", () => {
+  it("add prints the token once on stdout; list shows names, never tokens; revoke removes", async () => {
+    const dir = makeTree({ "marian-knows.yml": "name: KB\n" });
+    const add = await runCli(["token", "add", "anna"], { cwd: dir });
+    expect(add.code).toBe(0);
+    const token = add.stdout.trim();
+    expect(token).toMatch(/^mk_[A-Za-z0-9_-]{43}$/);
+    expect(add.stderr).toMatch(/Token 'anna' created\. It is shown only now/);
+    const file = path.join(dir, "marian-knows.tokens.json");
+    expect(readFileSync(file, "utf8")).not.toContain(token);
+    expect(existsSync(path.join(dir, ".marian-knows"))).toBe(false);
+
+    const list = await runCli(["token", "list"], { cwd: dir });
+    expect(list.code).toBe(0);
+    expect(list.stdout).toMatch(/^anna {2}created \d{4}-\d\d-\d\d \d\d:\d\d:\d\d {2}last used never\n$/);
+    const json = await runCli(["token", "list", "--json"], { cwd: dir });
+    expect(JSON.parse(json.stdout)).toEqual([{ name: "anna", createdAt: expect.any(String), lastUsedAt: null }]);
+    expect(json.stdout).not.toContain(token);
+
+    expect((await runCli(["token", "add", "anna"], { cwd: dir })).stderr).toBe(
+      "error: a token named 'anna' already exists\n",
+    );
+    const revoke = await runCli(["token", "revoke", "anna"], { cwd: dir });
+    expect([revoke.code, revoke.stdout]).toEqual([0, "Revoked 'anna'\n"]);
+    const empty = await runCli(["token", "list"], { cwd: dir });
+    expect([empty.code, empty.stdout]).toEqual([1, ""]);
+    const again = await runCli(["token", "revoke", "anna"], { cwd: dir });
+    expect([again.code, again.stderr]).toEqual([2, "error: no token named 'anna'\n"]);
+  });
+
+  it("each config has its own tokens file", async () => {
+    const dir = makeTree({ "team.yml": "name: Team\n" });
+    expect((await runCli(["token", "add", "anna", "--config", "team.yml"], { cwd: dir })).code).toBe(0);
+    expect(existsSync(path.join(dir, "team.tokens.json"))).toBe(true);
+  });
+
+  it("usage errors exit 2", async () => {
+    const dir = makeTree({ "marian-knows.yml": "name: KB\n" });
+    const cases = [["token"], ["token", "drop", "x"], ["token", "add"], ["token", "list", "x"], ["token", "add", " "]];
+    for (const args of cases) {
+      const r = await runCli(args, { cwd: dir });
+      expect([args, r.code]).toEqual([args, 2]);
+    }
+  });
+});
+
+describe.concurrent("serve options", () => {
+  it("--port and --host need --http; --port must be a port number", async () => {
+    const dir = makeTree({ "marian-knows.yml": "name: KB\n" });
+    const noHttp = await runCli(["serve", "--port", "3000"], { cwd: dir });
+    expect([noHttp.code, noHttp.stderr]).toEqual([2, "error: --port and --host need --http\n"]);
+    expect((await runCli(["serve", "--http", "--port", "x"], { cwd: dir })).code).toBe(2);
+    expect((await runCli(["serve", "--http", "--port", "70000"], { cwd: dir })).code).toBe(2);
+  });
+});
+
 describe.concurrent("exit codes", () => {
   it.each([
     [["status", "extra"], "error: unexpected argument 'extra' for status"],

@@ -13,6 +13,7 @@ export {
   IndexLockedError,
   IndexMissingError,
   InvalidPathError,
+  TokenError,
 } from "./errors.js";
 export { hasTag, inScope, matchesPath, validateScope } from "./filter.js";
 export { fold } from "./fold.js";
@@ -27,6 +28,7 @@ export {
   NO_LOG_ENV,
   isSessionEntry,
   logDir,
+  logAccess,
   logDisabled,
   logQuery,
   logSession,
@@ -69,11 +71,27 @@ export {
   search,
 } from "./search.js";
 export { status } from "./status.js";
+export {
+  LAST_USE_FLUSH_MS,
+  TOKEN_PREFIX,
+  TOKENS_ENV,
+  TOKENS_FILE_VERSION,
+  TokenVerifier,
+  addToken,
+  hashToken,
+  listTokens,
+  readTokens,
+  revokeToken,
+  tokensPath,
+} from "./tokens.js";
 export type { DocFilterOptions } from "./filter.js";
 export type { IndexOptions } from "./indexer.js";
 export type { DocRef, GetOptions, GetResult } from "./get.js";
 export type { ListItem, ListResult } from "./list.js";
 export type {
+  AccessDenial,
+  AccessLogEntry,
+  AccessRecord,
   ClientInfo,
   LogEntry,
   LogOp,
@@ -88,5 +106,6 @@ export type {
 } from "./log.js";
 export type { PreparedQuery, SearchHit, SearchOptions, SearchResult } from "./search.js";
 export type { ProjectStatus } from "./status.js";
+export type { TokenEntry, TokenInfo } from "./tokens.js";
 export type { IndexResult, LoadedConfig, ParsedDoc, ScanResult, ScannedFile, Section } from "./types.js";
 export { validateVirtualPath } from "./virtual-path.js";

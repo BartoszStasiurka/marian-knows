@@ -168,14 +168,15 @@ Pure functions, no DB.
     (synonym "Hiszpanii" for "spoza Polski", Polish question about an English page), which no FTS tuning fixes.
     Over MCP the agent writes the query itself, and the tool descriptions tell it to retry with synonyms.
   - Revisit when `log --zero` from real MCP use shows such misses often; semantic search stays under "Later".
-- [ ] Manual check with a real agent over MCP (Claude Code): ask the `queries-agent.yml` questions in natural
+- [x] Manual check with a real agent over MCP (Claude Code): ask the `queries-agent.yml` questions in natural
   language, see whether the agent finds the expected file (rewriting queries, retrying with synonyms, reading
   sections by anchor), and compare with the raw FTS numbers above; then check `log` for what it actually sent
 
-## 12. HTTP transport and auth
+## 12. HTTP transport and auth (done)
 
-- [ ] Streamable HTTP: `serve --http --port <n>`
-- [ ] Per-person opaque tokens, `Authorization: Bearer` (logic in `src/core/tokens.ts`, no new deps)
+- [x] Streamable HTTP: `serve --http --port <n>`
+  - One endpoint, `/mcp`; JSON responses; `--host` (default `127.0.0.1`), port default 3000
+- [x] Per-person opaque tokens, `Authorization: Bearer` (logic in `src/core/tokens.ts`, no new deps)
   - `token add <name>`: `mk_` + 32 random bytes (base64url), printed once; only SHA-256, name and date stored
   - `token list`: names, dates, last use; never the tokens
   - `token revoke <name>`: rejected from the next request on
@@ -185,9 +186,11 @@ Pure functions, no DB.
   - File has `version: 1` (a rollback must not misread a newer format); written atomically (temp file +
     `rename`), since `token add` over `docker compose exec` writes while the server reads
   - Last use kept in memory, flushed at most once a minute, not written on every request
-- [ ] Query log `who` = token name; rejected requests (401) go to `access-YYYY-MM-DD.jsonl`
-- [ ] Session `connect` / `disconnect` over HTTP: one MCP session (`Mcp-Session-Id`) = one pair; `disconnect` on
-  `DELETE` or session timeout
+  - Read-modify-write under a `<file>.lock`, so `token add` and the server's last-use flush keep each other's changes
+  - The server re-reads the file when it changes: `add` and `revoke` need no restart; a broken file rejects all
+- [x] Query log `who` = token name; rejected requests (401) go to `access-YYYY-MM-DD.jsonl`
+- [x] Session `connect` / `disconnect` over HTTP: one MCP session (`Mcp-Session-Id`) = one pair; `disconnect` on
+  `DELETE` or session timeout (30 min idle); a session is bound to the token that opened it
 
 ## 13. Index freshness
 

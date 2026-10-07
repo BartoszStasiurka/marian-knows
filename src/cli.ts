@@ -25,8 +25,16 @@ import {
   type ParsedDoc,
   type ProjectStatus,
   type QueryRecord,
+  type TokenInfo,
+  addToken,
+  listTokens,
+  revokeToken,
+  tokensPath,
 } from "./core/index.js";
-import { serveStdio } from "./mcp.js";
+import { serveHttp, serveStdio } from "./mcp.js";
+
+const DEFAULT_PORT = 3000;
+const DEFAULT_HOST = "127.0.0.1";
 
 const USAGE = `Usage: marian-knows <command> [options]
 
@@ -41,12 +49,15 @@ Commands:
   status                Show project, config and index state
   destroy               Remove this config's index and query logs; the config stays
   log                   Show the query log (search, get, list, MCP sessions), last 7 days
-  serve                 Run the MCP server over stdio (tools: search, get, list, status)
+  serve [--http]        Run the MCP server over stdio, or over HTTP (tools: search, get, list, status)
+  token add <name>      Create an HTTP access token; it is printed once
+  token list            List token names and dates (never the tokens)
+  token revoke <name>   Revoke a token; a running server rejects it from the next request on
   help                  Show this help
 
 Options:
   --config <file>          Path to marian-knows.yml (for init: the file to create)
-  --json                   JSON output (scan, parse, search, list, status, log)
+  --json                   JSON output (scan, parse, search, list, status, log, token list)
   --disk                   Include disk paths (scan; diagnostic only)
   --full                   Rebuild the index from scratch (index)
   -n <limit>               Max number of files (search; default 10)
@@ -58,6 +69,9 @@ Options:
   --max-chars <n>          Cut the output after n characters, 0 = no limit (get; default 20000)
   --days <n>               Entries from the last n days (log; default 7)
   --zero                   Only queries with no results (log)
+  --http                   Serve MCP over Streamable HTTP at /mcp, bearer token required (serve)
+  --port <n>               HTTP port (serve --http; default ${DEFAULT_PORT}, 0 = any free port)
+  --host <addr>            HTTP listen address (serve --http; default ${DEFAULT_HOST}, 0.0.0.0 = all)
   -h, --help               Show this help`;
 
 const OPTIONS = {
@@ -74,6 +88,9 @@ const OPTIONS = {
   "max-chars": { type: "string" },
   days: { type: "string" },
   zero: { type: "boolean" },
+  http: { type: "boolean" },
+  port: { type: "string" },
+  host: { type: "string" },
   help: { type: "boolean", short: "h" },
 } as const;
 
@@ -89,6 +106,7 @@ const ARITY: Record<string, number> = {
   destroy: 0,
   log: 0,
   serve: 0,
+  token: 2,
 };
 
 const warn = (warnings: string[]) => {
@@ -306,12 +324,72 @@ function destroy(values: { config?: string }): number {
   return 0;
 }
 
-async function serve(values: { config?: string }): Promise<number> {
+async function serve(values: { config?: string; http?: boolean; port?: string; host?: string }): Promise<number> {
+  if (!values.http && (values.port !== undefined || values.host !== undefined)) {
+    console.error("error: --port and --host need --http");
+    return 2;
+  }
+  let port = DEFAULT_PORT;
+  if (values.port !== undefined) {
+    const n = intOption("--port", values.port, 0);
+    if (n === null) return 2;
+    if (n > 65535) {
+      console.error(`error: --port must be at most 65535, got ${n}`);
+      return 2;
+    }
+    port = n;
+  }
   const config = requireConfig(values.config);
   if (!config) return 2;
+  if (values.http) {
+    // Lives until SIGINT / SIGTERM.
+    await serveHttp(config, { port, host: values.host ?? DEFAULT_HOST, tokensFile: tokensPath(config) });
+    return 0;
+  }
   // stdout carries the MCP protocol; the process lives until the client closes stdin.
   await serveStdio(config);
   return 0;
+}
+
+const TOKEN_USAGE = "Usage: marian-knows token add <name> | token list | token revoke <name>";
+
+function formatToken(t: TokenInfo): string {
+  const date = (iso: string | null) => (iso === null ? "never" : iso.slice(0, 19).replace("T", " "));
+  return `${t.name}  created ${date(t.createdAt)}  last used ${date(t.lastUsedAt)}`;
+}
+
+function token(args: string[], values: { config?: string; json?: boolean }): number {
+  const [action, name] = args;
+  if (action !== "add" && action !== "list" && action !== "revoke") {
+    const problem = action === undefined ? "missing token action" : `unknown token action: ${action}`;
+    console.error(`error: ${problem}. ${TOKEN_USAGE}`);
+    return 2;
+  }
+  if (action === "list" ? name !== undefined : name === undefined) {
+    const problem = name === undefined ? "missing <name>" : `unexpected argument '${name}' for token list`;
+    console.error(`error: ${problem}. ${TOKEN_USAGE}`);
+    return 2;
+  }
+  const config = requireConfig(values.config);
+  if (!config) return 2;
+  const file = tokensPath(config);
+  switch (action) {
+    case "add":
+      // The token alone on stdout, so a script can capture it; the note goes to stderr.
+      console.log(addToken(file, name!));
+      console.error(`Token '${name!.trim()}' created. It is shown only now; store it. Keep ${file} out of git.`);
+      return 0;
+    case "list": {
+      const tokens = listTokens(file);
+      if (values.json) console.log(JSON.stringify(tokens));
+      else for (const t of tokens) console.log(formatToken(t));
+      return tokens.length ? 0 : 1;
+    }
+    case "revoke":
+      revokeToken(file, name!);
+      console.log(`Revoked '${name!.trim()}'`);
+      return 0;
+  }
 }
 
 const PREVIEW_CHARS = 80;
@@ -412,6 +490,8 @@ async function main(argv: string[]): Promise<number> {
         return log(values);
       case "serve":
         return await serve(values);
+      case "token":
+        return token(args, values);
       default:
         console.error(`error: unknown command: ${command}\n\n${USAGE}`);
         return 2;
@@ -425,7 +505,7 @@ async function main(argv: string[]): Promise<number> {
       console.error(e.message);
       return 2;
     }
-    // IndexLockedError, InvalidPathError, DocNotFoundError and anything unexpected: exit 2, never 1
+    // IndexLockedError, InvalidPathError, DocNotFoundError, TokenError and anything unexpected: exit 2, never 1
     // (that means "no results").
     console.error(`error: ${e instanceof Error ? e.message : String(e)}`);
     return 2;

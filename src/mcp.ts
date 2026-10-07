@@ -1,15 +1,22 @@
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { isInitializeRequest, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import {
+  TokenVerifier,
   get as getRef,
   list as listIndex,
+  logAccess,
   logQuery,
   logSession,
   search as searchIndex,
   status as projectStatus,
+  type AccessDenial,
   type DocFilterOptions,
   type LoadedConfig,
   type QueryRecord,
@@ -234,5 +241,211 @@ export async function serveStdio(config: LoadedConfig): Promise<void> {
   process.stdin.once("end", () => void server.close());
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.once(signal, () => void server.close().finally(() => process.exit(0)));
+  }
+}
+
+/** The one HTTP endpoint; anything else is 404. */
+export const MCP_HTTP_PATH = "/mcp";
+/** A session with no request for this long is closed (and logs `disconnect`); the client then starts a new one. */
+export const SESSION_IDLE_MS = 30 * 60_000;
+/** Largest POST body read; tool arguments are a few hundred bytes. */
+const MAX_BODY_BYTES = 1024 * 1024;
+
+export interface HttpOptions {
+  port: number;
+  host: string;
+  /** Disk path of the tokens file. */
+  tokensFile: string;
+  idleMs?: number;
+}
+
+export interface HttpServerHandle {
+  /** Endpoint URL, with the port actually bound (`port: 0` picks a free one). */
+  url: string;
+  /** Open MCP sessions. */
+  sessions(): number;
+  /** Number of tokens the server accepts right now. */
+  tokens(): number;
+  /** Closes every session (logging `disconnect`), writes pending token use, stops listening. */
+  close(): Promise<void>;
+}
+
+interface Session {
+  transport: StreamableHTTPServerTransport;
+  server: McpServer;
+  /** Token name that opened the session; only that token may use it. */
+  who: string;
+  lastSeen: number;
+}
+
+class BodyError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+function sendJson(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
+  res.writeHead(status, { "Content-Type": "application/json", ...headers }).end(JSON.stringify(body));
+}
+
+const rpcError = (res: ServerResponse, status: number, code: number, message: string) =>
+  sendJson(res, status, { jsonrpc: "2.0", error: { code, message }, id: null });
+
+async function readJson(req: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req as AsyncIterable<Buffer>) {
+    size += chunk.length;
+    if (size > MAX_BODY_BYTES) throw new BodyError(413, -32600, "Request body too large");
+    chunks.push(chunk);
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+  } catch {
+    throw new BodyError(400, -32700, "Parse error: invalid JSON");
+  }
+}
+
+/**
+ * Serves the knowledge base over Streamable HTTP at `MCP_HTTP_PATH`. Every request needs
+ * `Authorization: Bearer <token>`; a missing or unknown token gets 401 and a line in the access log.
+ * One `Mcp-Session-Id` session = one MCP server instance, logged as one `connect` / `disconnect` pair;
+ * it ends on `DELETE` or after `idleMs` without requests.
+ */
+export async function startHttpServer(config: LoadedConfig, options: HttpOptions): Promise<HttpServerHandle> {
+  const warn = (warnings: string[]) => {
+    for (const w of warnings) console.error(`! warning: ${w}`);
+  };
+  const verifier = new TokenVerifier(options.tokensFile, (w) => warn([w]));
+  const sessions = new Map<string, Session>();
+  const idleMs = options.idleMs ?? SESSION_IDLE_MS;
+
+  const authenticate = (req: IncomingMessage): { who: string } | { denied: AccessDenial } => {
+    const header = req.headers.authorization;
+    if (header === undefined) return { denied: "missing" };
+    const match = /^Bearer +(\S+) *$/i.exec(header);
+    if (!match) return { denied: "malformed" };
+    const who = verifier.verify(match[1]!);
+    return who === null ? { denied: "unknown" } : { who };
+  };
+
+  const deny = (req: IncomingMessage, res: ServerResponse, path: string, reason: AccessDenial) => {
+    const forwarded = req.headers["x-forwarded-for"];
+    warn(
+      logAccess(config, {
+        reason,
+        ip: req.socket.remoteAddress ?? null,
+        ...(forwarded !== undefined && { forwardedFor: String(forwarded) }),
+        method: req.method ?? "",
+        path,
+        userAgent: req.headers["user-agent"] ?? null,
+      }),
+    );
+    sendJson(res, 401, { error: "unauthorized" }, { "WWW-Authenticate": 'Bearer realm="marian-knows"' });
+  };
+
+  const handle = async (req: IncomingMessage, res: ServerResponse) => {
+    const { pathname } = new URL(req.url ?? "/", "http://localhost");
+    if (pathname !== MCP_HTTP_PATH) return sendJson(res, 404, { error: "not found" });
+    const auth = authenticate(req);
+    if ("denied" in auth) return deny(req, res, pathname, auth.denied);
+
+    let body: unknown;
+    if (req.method === "POST") {
+      try {
+        body = await readJson(req);
+      } catch (e) {
+        if (e instanceof BodyError) return rpcError(res, e.status, e.code, e.message);
+        throw e;
+      }
+    }
+
+    const sessionId = req.headers["mcp-session-id"];
+    if (sessionId !== undefined) {
+      const session = typeof sessionId === "string" ? sessions.get(sessionId) : undefined;
+      // A session belongs to the token that opened it; another token sees it as unknown.
+      if (!session || session.who !== auth.who) return rpcError(res, 404, -32001, "Session not found");
+      session.lastSeen = Date.now();
+      return session.transport.handleRequest(req, res, body);
+    }
+    if (req.method !== "POST" || !isInitializeRequest(body)) {
+      return rpcError(res, 400, -32000, "Bad Request: no valid session ID");
+    }
+
+    const server = createMcpServer(config, { who: auth.who });
+    const transport: StreamableHTTPServerTransport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: randomUUID,
+      enableJsonResponse: true,
+      onsessioninitialized: (id) => {
+        sessions.set(id, { transport, server, who: auth.who, lastSeen: Date.now() });
+      },
+    });
+    // Set before connect: the server chains its own close handler (which logs `disconnect`) after this one.
+    transport.onclose = () => {
+      if (transport.sessionId) sessions.delete(transport.sessionId);
+    };
+    await server.connect(transport);
+    await transport.handleRequest(req, res, body);
+  };
+
+  const http = createServer((req, res) => {
+    handle(req, res).catch((e: unknown) => {
+      console.error(`! error: ${e instanceof Error ? e.message : String(e)}`);
+      if (!res.headersSent) rpcError(res, 500, -32603, "Internal server error");
+      else res.end();
+    });
+  });
+
+  const sweep = setInterval(
+    () => {
+      const now = Date.now();
+      for (const s of sessions.values()) if (now - s.lastSeen > idleMs) void s.server.close();
+    },
+    Math.min(idleMs, 60_000),
+  );
+  sweep.unref();
+
+  await new Promise<void>((resolve, reject) => {
+    http.once("error", reject);
+    http.listen(options.port, options.host, () => {
+      http.off("error", reject);
+      resolve();
+    });
+  });
+  const { port } = http.address() as AddressInfo;
+  const host = options.host.includes(":") ? `[${options.host}]` : options.host;
+
+  return {
+    url: `http://${host}:${port}${MCP_HTTP_PATH}`,
+    sessions: () => sessions.size,
+    tokens: () => verifier.size,
+    async close() {
+      clearInterval(sweep);
+      await Promise.all([...sessions.values()].map((s) => s.server.close()));
+      verifier.flush();
+      await new Promise<void>((resolve) => {
+        http.close(() => resolve());
+        http.closeAllConnections();
+      });
+    },
+  };
+}
+
+/** Runs the HTTP server until SIGINT / SIGTERM, which close every session before exiting. Diagnostics go to stderr. */
+export async function serveHttp(config: LoadedConfig, options: HttpOptions): Promise<void> {
+  const handle = await startHttpServer(config, options);
+  console.error(`MCP over HTTP: ${handle.url}`);
+  if (handle.tokens() === 0) {
+    console.error(
+      `! warning: no tokens in ${options.tokensFile}: every request is rejected. ` +
+        "Add one: marian-knows token add <name>",
+    );
+  }
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.once(signal, () => void handle.close().finally(() => process.exit(0)));
   }
 }

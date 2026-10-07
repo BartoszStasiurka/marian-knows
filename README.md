@@ -1,6 +1,6 @@
 # MarianKnows
 
-Markdown knowledge base with full-text search (SQLite FTS5). CLI first, MCP later.
+Markdown knowledge base with full-text search (SQLite FTS5). CLI first, MCP over stdio or HTTP.
 
 The `.md` files are the source of truth; the SQLite index is a disposable derivative you can delete and rebuild
 at any time. Full requirements: [docs/requirements.md](docs/requirements.md) (Polish). Plan: [docs/roadmap.md](docs/roadmap.md).
@@ -84,7 +84,8 @@ in diagnostics (`scan --disk`, `status`).
 | `status`              | Project, config and index state (`--json`)                                        |
 | `destroy`             | Remove this config's index and query logs; the config and `.md` files stay        |
 | `log`                 | Show the query log and MCP sessions (`--days`, `--zero`, `--json`)                |
-| `serve`               | Run the MCP server over stdio for AI agents                                       |
+| `serve`               | Run the MCP server for AI agents: stdio, or `--http` with bearer tokens           |
+| `token add <name>`    | Create an HTTP access token, printed once (also `token list`, `token revoke`)     |
 | `help`                | Show help (also `--help`, `-h`)                                                   |
 
 ### Search
@@ -159,6 +160,29 @@ CLI message; a scope that covers no file adds a `warning:` text block. Calls go 
 `source: "mcp"` and `who: "local"`, framed by `connect` and `disconnect`. Over stdio a session lasts until the
 client closes stdin or the server gets SIGINT / SIGTERM; a killed server logs no `disconnect`.
 
+### Over HTTP
+
+`marian-knows serve --http` serves the same tools over Streamable HTTP at `/mcp`. Every request needs
+`Authorization: Bearer <token>`; anything else gets 401.
+
+```bash
+marian-knows token add anna                         # prints mk_… once; only its SHA-256 is stored
+marian-knows serve --http --port 3000               # listens on 127.0.0.1; --host 0.0.0.0 for all interfaces
+claude mcp add --transport http kb http://127.0.0.1:3000/mcp --header "Authorization: Bearer mk_…"
+```
+
+- Tokens live in `<config name>.tokens.json` next to the config (`marian-knows.yml` →
+  `marian-knows.tokens.json`), outside `.marian-knows/`, so `destroy` revokes nobody. `MARIAN_KNOWS_TOKENS`
+  overrides the path. Add the file to `.gitignore`.
+- `token list` shows names, creation and last use (written at most once a minute), never tokens.
+  `token revoke <name>` applies from the server's next request on, also inside open sessions; no restart.
+- Calls are logged with `who` = token name. A session (`Mcp-Session-Id`) is one `connect` / `disconnect` pair; it
+  ends on `DELETE` or after 30 minutes without requests, and only the token that opened it can use it.
+- Rejected requests go to `.marian-knows/<config name>/logs/access-YYYY-MM-DD.jsonl`: time, reason (`missing`,
+  `malformed`, `unknown`), peer address, `X-Forwarded-For`, method, path, user agent; never the token. This log
+  is written even with `MARIAN_KNOWS_NO_LOG`.
+- Plain HTTP: put HTTPS in front with a reverse proxy before leaving localhost.
+
 File content reaches the agent's context unchanged: whoever can write to the knowledge repo can steer
 connected agents (prompt injection), so treat write access to it as an admin right.
 
@@ -209,7 +233,7 @@ none.
 | ---- | ------------------------------------------------------------------------------------------------ |
 | 0    | OK                                                                                               |
 | 1    | No results from `search`, `list` or `log` (like `grep`)                                          |
-| 2    | Error: missing or invalid config, invalid virtual path, unknown anchor, missing index, bad arguments, `index` already running, unexpected failure |
+| 2    | Error: missing or invalid config, invalid virtual path, unknown anchor, missing index, bad arguments, `index` already running, tokens file or `token` error, unexpected failure |
 
 ## Library
 

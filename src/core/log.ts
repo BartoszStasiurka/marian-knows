@@ -56,6 +56,26 @@ export interface SessionLogEntry {
 
 export type LogEntry = QueryLogEntry | SessionLogEntry;
 
+/** Why the HTTP server answered 401. `unknown` covers revoked tokens too. */
+export type AccessDenial = "missing" | "malformed" | "unknown";
+
+/** One line of `access-YYYY-MM-DD.jsonl`: a request the HTTP server rejected. Never the token itself. */
+export interface AccessLogEntry {
+  ts: string;
+  status: 401;
+  reason: AccessDenial;
+  /** Peer address; behind a reverse proxy, the proxy's. */
+  ip: string | null;
+  /** `X-Forwarded-For` as sent, when present. */
+  forwardedFor?: string;
+  method: string;
+  /** Request path without the query string. */
+  path: string;
+  userAgent: string | null;
+}
+
+export type AccessRecord = Omit<AccessLogEntry, "ts" | "status">;
+
 export const isSessionEntry = (e: LogEntry): e is SessionLogEntry => e.op === "connect" || e.op === "disconnect";
 
 export interface SessionRecord {
@@ -78,7 +98,7 @@ export interface QueryRecord {
 }
 
 const QUERY_FILE = /^queries-(\d{4}-\d{2}-\d{2})\.jsonl$/;
-/** Any dated log file (`queries-…`, later `access-…`), for retention. */
+/** Any dated log file (`queries-…`, `access-…`), for retention. */
 const DATED_FILE = /^[a-z]+-(\d{4}-\d{2}-\d{2})\.jsonl$/;
 const DAY_MS = 86_400_000;
 
@@ -128,13 +148,37 @@ export function logSession(config: LoadedConfig, record: SessionRecord, now: Dat
   return appendEntry(config, entry, now);
 }
 
+/**
+ * Appends a rejected HTTP request (401) to today's (UTC) access log. Not turned off by `MARIAN_KNOWS_NO_LOG`:
+ * it is a security record, not a usage one. Never throws; returns warnings.
+ */
+export function logAccess(config: LoadedConfig, record: AccessRecord, now: Date = new Date()): string[] {
+  const { forwardedFor, ...rest } = record;
+  const entry: AccessLogEntry = {
+    ts: now.toISOString(),
+    status: 401,
+    reason: rest.reason,
+    ip: rest.ip,
+    ...(forwardedFor !== undefined && { forwardedFor }),
+    method: rest.method,
+    path: rest.path,
+    userAgent: rest.userAgent,
+  };
+  return appendLine(config, "access", entry, now);
+}
+
 function appendEntry(config: LoadedConfig, entry: LogEntry, now: Date): string[] {
+  return appendLine(config, "queries", entry, now);
+}
+
+function appendLine(config: LoadedConfig, kind: "queries" | "access", entry: { ts: string }, now: Date): string[] {
   const dir = logDir(config);
   try {
     mkdirSync(dir, { recursive: true });
-    appendFileSync(path.join(dir, `queries-${entry.ts.slice(0, 10)}.jsonl`), JSON.stringify(entry) + "\n");
+    appendFileSync(path.join(dir, `${kind}-${entry.ts.slice(0, 10)}.jsonl`), JSON.stringify(entry) + "\n");
   } catch (e) {
-    return [`cannot write the query log (${(e as NodeJS.ErrnoException).code ?? (e as Error).message})`];
+    const what = kind === "queries" ? "query" : "access";
+    return [`cannot write the ${what} log (${(e as NodeJS.ErrnoException).code ?? (e as Error).message})`];
   }
   return pruneLogs(dir, now);
 }
