@@ -176,8 +176,10 @@ Pure functions, no DB.
   - `<config name>.tokens.json` next to the config (outside `.marian-knows/`, so `destroy` does not
     revoke everyone), git-ignored; `MARIAN_KNOWS_TOKENS` overrides the path
   - Hash comparison with `timingSafeEqual`
+  - File has `version: 1` (a rollback must not misread a newer format); written atomically (temp file +
+    `rename`), since `token add` over `docker compose exec` writes while the server reads
+  - Last use kept in memory, flushed at most once a minute, not written on every request
 - [ ] Query log `who` = token name; rejected requests (401) go to `access-YYYY-MM-DD.jsonl`
-- [ ] Rate limit per token
 
 ## 13. Index freshness
 
@@ -186,8 +188,26 @@ Pure functions, no DB.
 
 ## 14. Deploy
 
-- [ ] Dockerfile (native `better-sqlite3` built in the image), volumes for the knowledge repo and `.marian-knows/`
+The container is disposable; all state lives on volumes, so a rebuild replaces code only.
+
+- [ ] Index lock survives container restarts: store `hostname:pid` instead of the pid
+  - In a container the server always gets the same pid (1, or 7 under `tini`). A lock left by a killed
+    container holds that pid, the new server sees it "alive" and `syncIndex` fails forever. A lock from another
+    hostname is stale.
+- [ ] Graceful shutdown on SIGTERM: stop accepting requests, finish running ones, close the DB, release the lock
+- [ ] Dockerfile: multi-stage on `node:20-bookworm-slim`, native `better-sqlite3` built in the image, runs as
+  `node` (UID 1000); `buildx --platform linux/amd64` when building on Apple Silicon
+- [ ] Volume layout
+  - `/data` (read-write): `marian-knows.yml`, `marian-knows.tokens.json`, `.marian-knows/` (index, logs, lock);
+    the host directory must be owned by UID 1000
+  - `/knowledge` (read-only): the knowledge repo; the container config has `path: /knowledge`
+  - SQLite in WAL mode needs a local disk: `/data` must not be NFS or SMB
+- [ ] Image tagged with version and git SHA (no `latest`); deploy = bump the tag in `compose.yml`,
+  `docker compose pull && docker compose up -d`; rollback = previous tag (a `schema_version` mismatch rebuilds
+  the index in both directions)
 - [ ] HTTPS via reverse proxy, healthcheck
+- [ ] Ops notes: back up the tokens file (the only state that cannot be rebuilt); a config change needs a
+  restart, not a rebuild (server instructions are built at start); `token add` via `docker compose exec`
 - [ ] Connection guide: Claude Code, Claude Desktop / claude.ai, custom Agent SDK agents
 
 ## Later (not planned)

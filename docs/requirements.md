@@ -263,7 +263,8 @@ Cel: baza wiedzy dla agentów AI, wystawiona jako serwer MCP w sieci. Jeden serw
 - `token add <name>`: generuje `mk_` + 32 losowe bajty (base64url), wypisuje token jeden raz. Zapisywane są tylko: nazwa, SHA-256 tokenu, data utworzenia, data ostatniego użycia. Nazwa unikalna, zasady jak dla `name`.
 - `token list`: nazwy i daty, nigdy tokeny. `token revoke <name>`: token przestaje działać od następnego żądania.
 - Plik `<nazwa>.tokens.json` obok pliku konfiguracji (`marian-knows.yml` → `marian-knows.tokens.json`; każda konfiguracja ma własne tokeny), poza `.marian-knows/` (więc `destroy` nie odbiera dostępu), poza repozytorium wiedzy, dopisywany do `.gitignore` przez użytkownika. `MARIAN_KNOWS_TOKENS` nadpisuje ścieżkę.
-- Porównanie hashy w stałym czasie (`timingSafeEqual`). Limit żądań per token.
+- Porównanie hashy w stałym czasie (`timingSafeEqual`).
+- Plik tokenów ma pole `version: 1` i jest zapisywany atomowo (plik tymczasowy + `rename`). Data ostatniego użycia trzymana w pamięci i zapisywana najwyżej raz na minutę.
 - JWT nie w v2: serwer sam wydaje i sam weryfikuje tokeny, a JWT utrudnia natychmiastowe odwołanie. JWT wchodzi razem z OAuth, jeśli wymaga go klient MCP.
 - Stdio nie wymaga tokenu (proces lokalny).
 
@@ -271,6 +272,6 @@ Cel: baza wiedzy dla agentów AI, wystawiona jako serwer MCP w sieci. Jeden serw
 - Serwer wykonuje `syncIndex` przy starcie i co N minut; WAL pozwala czytać w trakcie.
 - Opcjonalnie endpoint webhook z sekretem wymuszający synchronizację (np. po `git push`).
 
-**Wdrożenie:** obraz Docker (natywny `better-sqlite3` budowany w obrazie), wolumeny na repozytorium wiedzy, `.marian-knows/` i plik tokenów, HTTPS przez reverse proxy.
+**Wdrożenie:** obraz Docker (natywny `better-sqlite3` budowany w obrazie), kontener jednorazowy, cały stan na wolumenach: `/data` (config, plik tokenów, `.marian-knows/`) i `/knowledge` (repozytorium wiedzy, tylko do odczytu). HTTPS przez reverse proxy. Lock indeksu przechowuje `hostname:pid`, bo PID procesu w kontenerze powtarza się między restartami. SIGTERM kończy trwające żądania i zamyka bazę.
 
 **Poza v2:** podział public/internal, wiele baz na serwer, OAuth, wyszukiwanie semantyczne (tylko jeśli pomiary jakości dla zapytań agentowych pokażą potrzebę), zapis przez MCP.
