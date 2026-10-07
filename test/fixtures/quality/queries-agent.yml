@@ -1,6 +1,6 @@
 # Agent-style quality set: queries the way an AI agent sends them against ./kb.
 # Whole questions, synonyms of the words on the page, Polish questions about English pages and back.
-# Measured only (no regression floor): the baseline for tuning in roadmap stage 11.
+# Guarded by floors in quality.test.ts since roadmap stage 11 (lower than the keyword set: see the misses there).
 # Same format as queries.yml.
 
 # Whole questions

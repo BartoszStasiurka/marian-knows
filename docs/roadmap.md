@@ -145,8 +145,21 @@ Pure functions, no DB.
 
 ## 11. Search quality for agents
 
-- [ ] Tune for long natural-language queries (OR fallback threshold, question stop words), measured on the stage 9 set
-- [ ] Decide with numbers whether FTS is enough or semantic search goes on the roadmap
+- [x] Tune for long natural-language queries (OR fallback threshold, question stop words), measured on the stage 9 set
+  - PL/EN question and helper words added to the stop words (`ile`, `kto`, `mogę`, `they`, `should`…; not
+    quantifiers: "how many" matches "Too Many Requests"). Agent set MRR 0.754 → 0.757, keyword set 0.946 → 0.954.
+  - No effect or worse, kept as they were: fallback threshold 2-10 (long questions never pass the strict AND),
+    separate bm25 weights for the OR fallback (lower title weight: MRR down to 0.71), ranking OR results by the
+    number of matched words (MRR down to 0.74).
+  - Floors for the agent set in `quality.test.ts`: hit@5 0.91, MRR 0.75; keyword set MRR floor 0.94 → 0.95.
+- [x] Decide with numbers whether FTS is enough or semantic search goes on the roadmap
+  - FTS stays. Agent set hit@5 91.3% (21/23) on raw questions; both misses share no word with their page
+    (synonym "Hiszpanii" for "spoza Polski", Polish question about an English page), which no FTS tuning fixes.
+    Over MCP the agent writes the query itself, and the tool descriptions tell it to retry with synonyms.
+  - Revisit when `log --zero` from real MCP use shows such misses often; semantic search stays under "Later".
+- [ ] Manual check with a real agent over MCP (Claude Code): ask the `queries-agent.yml` questions in natural
+  language, see whether the agent finds the expected file (rewriting queries, retrying with synonyms, reading
+  sections by anchor), and compare with the raw FTS numbers above; then check `log` for what it actually sent
 
 ## 12. HTTP transport and auth
 

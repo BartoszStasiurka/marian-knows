@@ -210,10 +210,12 @@ Wartości startowe, bez decyzji z góry; do dostrojenia na zestawie testowym jak
 - Sekcje: łączenie z poprzednią, gdy krótsza niż 200 znaków; dzielenie po akapitach, gdy dłuższa niż 2000 znaków.
 - Wagi rankingu: tytuł 10, tagi 5, nagłówek sekcji 5, treść 1.
 - Próg fallbacku AND → OR: mniej niż 3 wyniki.
-- Stop-słowa: wbudowana lista PL/EN.
+- Stop-słowa: wbudowana lista PL/EN, z pytajnymi i pomocniczymi (dla pytań agentów).
 - Skracanie słów: o 2 litery, minimum 4 znaki.
 
 Pierwsze strojenie (62 zapytania, 28 plików): wagi (od 1/1/1/1 do 20/10/10/1), próg fallbacku (2–10), stop-słowa i rozmiary sekcji zmieniały wynik najwyżej o jedno zapytanie, więc zostały bez zmian. Skracanie było jedyną realną dźwignią: dawna reguła (tylko słowa > 5 znaków) nie łapała odmian 5-literowych słów (`biura`/„biuro”, `hasło`/„hasła”, `marcu`/„marca”); nowa podniosła hit@5 z 96,8% do 100% i MRR z 0,922 do 0,946.
+
+Strojenie pod zapytania agentowe (23 pytania w `queries-agent.yml`): stop-słowa poszerzone o słowa pytające i pomocnicze PL/EN (`ile`, `kto`, `mogę`, `they`, `should`…; bez kwantyfikatorów, bo „how many” trafia w „Too Many Requests”). MRR zestawu agentowego 0,754 → 0,757, słów kluczowych 0,946 → 0,954. Próg fallbacku (2–10), osobne wagi dla OR i ranking OR po liczbie trafionych słów nie pomogły albo pogorszyły wynik. Decyzja: FTS wystarcza; oba chybienia (hit@5 91,3%) nie mają ani jednego wspólnego słowa ze stroną (synonim, inny język), więc wyszukiwanie semantyczne wraca do rozważenia dopiero, gdy `log --zero` z realnego użycia MCP pokaże takie chybienia często.
 
 ## 9. Serwer MCP (v2)
 

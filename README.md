@@ -95,7 +95,8 @@ marian-knows search "pg_restore" --exact
   appended below the strict ones.
 - Polish inflection without a stemmer: words longer than 4 letters lose their last 2 (keeping at least 4) and
   match as a prefix, so `konfiguracja` finds "konfiguracji". Diacritics are ignored (`zolw` finds "żółw").
-- Common PL/EN stop words are dropped, unless the query is only stop words.
+- Common PL/EN stop words, including question words (`ile`, `kto`, `should`), are dropped, unless the query
+  is only stop words.
 - `--exact` turns off trimming, prefix matching and the OR fallback.
 - `-n <limit>` (default 10), `--tag <tag>` (case-insensitive).
 - `--path` and `--exclude-path` take virtual paths and are repeatable. A trailing `/` means a directory

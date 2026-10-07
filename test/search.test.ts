@@ -53,6 +53,13 @@ describe("prepareQuery", () => {
     expect(prepareQuery("the and of the").words).toEqual(["the", "and", "of", "the"]);
   });
 
+  it("drops question words from agent-style questions, keeps quantifiers", () => {
+    expect(prepareQuery("Kto zatwierdza wniosek o wolne?").words).toEqual(["zatwierdza", "wniosek", "wolne"]);
+    expect(prepareQuery("Ile kosztuje karta, którą mogę dostać?").words).toEqual(["kosztuje", "karta", "dostać"]);
+    expect(prepareQuery("How long should they keep backups?").words).toEqual(["long", "keep", "backups"]);
+    expect(prepareQuery("how many requests are left").words).toEqual(["many", "requests", "left"]);
+  });
+
   it("folds ł and normalizes to NFC", () => {
     expect(prepareQuery("Łódź żółw", { exact: true }).words).toEqual(["lódź", "żólw"]);
     expect(prepareQuery("zólw", { exact: true }).words).toEqual(["zólw"]);

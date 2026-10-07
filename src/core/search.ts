@@ -21,9 +21,16 @@ export const STOP_WORDS: ReadonlySet<string> = new Set(
     "już", "ku", "lub", "ma", "mi", "na", "nad", "nie", "niż", "o", "od", "oraz", "po", "pod", "przez", "przy",
     "się", "są", "ta", "tak", "także", "te", "tego", "ten", "też", "to", "tu", "tylko", "u", "w", "we", "więc",
     "z", "za", "ze", "że", "żeby", "który", "która", "które", "którzy",
+    // Polish question and helper words (agent-style questions)
+    "ile", "kiedy", "kto", "kogo", "komu", "kim", "czym", "czego", "skąd", "dokąd", "jakim", "jakiej", "jakich",
+    "jaką", "którą", "których", "którym", "której", "tym", "tej", "tych", "mogę", "możemy", "można", "trzeba", "należy",
+    "musi", "muszę", "mam", "mają", "jestem", "jesteś", "był", "była", "było", "były", "będzie", "sprawie",
     // English
     "an", "and", "are", "as", "at", "be", "by", "can", "does", "for", "from", "how", "in", "is", "it", "of",
     "on", "or", "that", "the", "this", "was", "what", "when", "where", "which", "who", "why", "with",
+    // English question and helper words (not quantifiers: "how many" often matches "Too Many Requests")
+    "did", "my", "me", "we", "our", "you", "your", "they", "them", "their", "there", "he", "she", "his", "her",
+    "should", "would", "could", "will", "have", "has", "had", "if", "about", "into",
   ].map((w) => fold(w)),
 );
 

@@ -8,7 +8,10 @@ import { AGENT_SET, TOP_K, evaluate, formatReport, indexFixture, loadQueries } f
  * a drop below means ranking got worse (see the printed report for which queries moved).
  */
 const MIN_HIT_RATE = 1;
-const MIN_MRR = 0.94;
+const MIN_MRR = 0.95;
+/** Agent-style set: the two misses share no words with their pages (synonym, cross-language). */
+const MIN_AGENT_HIT_RATE = 0.91;
+const MIN_AGENT_MRR = 0.75;
 
 /** A typo in `expect` would silently count as a miss. */
 function expectIndexed(config: Parameters<typeof list>[0], queries: ReturnType<typeof loadQueries>) {
@@ -28,11 +31,14 @@ describe("search quality", () => {
     expect(report.mrr).toBeGreaterThanOrEqual(MIN_MRR);
   });
 
-  // Measure only: no floors until roadmap stage 11 tunes for these.
-  it(`agent-style queries: hit@${TOP_K} and MRR reported`, async () => {
+  it(`agent-style queries: hit@${TOP_K} and MRR stay above the floors`, async () => {
     const config = await indexFixture(makeTree());
     const queries = loadQueries(AGENT_SET);
     expectIndexed(config, queries);
-    console.log(formatReport(evaluate(config, queries), "agent queries"));
+
+    const report = evaluate(config, queries);
+    console.log(formatReport(report, "agent queries"));
+    expect(report.hitRate).toBeGreaterThanOrEqual(MIN_AGENT_HIT_RATE);
+    expect(report.mrr).toBeGreaterThanOrEqual(MIN_AGENT_MRR);
   });
 });
