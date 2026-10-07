@@ -25,9 +25,11 @@ export {
   LOG_RETENTION_DAYS,
   LOG_TOP,
   NO_LOG_ENV,
+  isSessionEntry,
   logDir,
   logDisabled,
   logQuery,
+  logSession,
   readQueryLog,
 } from "./log.js";
 export {
@@ -71,7 +73,19 @@ export type { DocFilterOptions } from "./filter.js";
 export type { IndexOptions } from "./indexer.js";
 export type { DocRef, GetOptions, GetResult } from "./get.js";
 export type { ListItem, ListResult } from "./list.js";
-export type { LogOp, LogSource, QueryLogEntry, QueryRecord, ReadLogOptions, ReadLogResult } from "./log.js";
+export type {
+  ClientInfo,
+  LogEntry,
+  LogOp,
+  LogSource,
+  QueryLogEntry,
+  QueryRecord,
+  ReadLogOptions,
+  ReadLogResult,
+  SessionLogEntry,
+  SessionOp,
+  SessionRecord,
+} from "./log.js";
 export type { PreparedQuery, SearchHit, SearchOptions, SearchResult } from "./search.js";
 export type { ProjectStatus } from "./status.js";
 export type { IndexResult, LoadedConfig, ParsedDoc, ScanResult, ScannedFile, Section } from "./types.js";

@@ -147,6 +147,12 @@ Pure functions, no DB.
   `search` description, also in `status`
 - [x] Index directory per config: `.marian-knows/<config name>/`, so several configs share a directory;
   `destroy` removes only its own; an old `.marian-knows/index.db` gets a warning
+- [x] Log MCP session start and end in the query log
+  - `op`: `connect` / `disconnect`; `source: mcp`, `who` as for queries
+  - `connect`: client name and version from the MCP `initialize` request (`clientInfo`)
+  - `disconnect`: session duration in ms and number of tool calls; over stdio the session is the process
+    lifetime (stdin closed, SIGINT/SIGTERM); a killed process leaves no `disconnect`
+  - `log` shows them; `log --zero` skips them
 
 ## 11. Search quality for agents
 
@@ -180,6 +186,8 @@ Pure functions, no DB.
     `rename`), since `token add` over `docker compose exec` writes while the server reads
   - Last use kept in memory, flushed at most once a minute, not written on every request
 - [ ] Query log `who` = token name; rejected requests (401) go to `access-YYYY-MM-DD.jsonl`
+- [ ] Session `connect` / `disconnect` over HTTP: one MCP session (`Mcp-Session-Id`) = one pair; `disconnect` on
+  `DELETE` or session timeout
 
 ## 13. Index freshness
 

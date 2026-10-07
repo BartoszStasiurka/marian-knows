@@ -3,7 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
-import { loadConfig, readQueryLog, rebuildIndex } from "../src/core/index.js";
+import { isSessionEntry, loadConfig, readQueryLog, rebuildIndex, type SessionLogEntry } from "../src/core/index.js";
 import { createMcpServer } from "../src/mcp.js";
 import { CLI, TSX, makeTree } from "./helpers.js";
 
@@ -178,7 +178,9 @@ describe("MCP server", () => {
     await call(client, "list", { tag: "hr" });
     await call(client, "get", { path: "/x.md" }); // failed calls are not logged
     await call(client, "status"); // status is not logged
-    const entries = readQueryLog(config).entries.map(({ ts: _ts, ms: _ms, ...e }) => e);
+    const entries = readQueryLog(config)
+      .entries.filter((e) => !isSessionEntry(e))
+      .map(({ ts: _ts, ms: _ms, ...e }) => e);
     expect(entries).toEqual([
       {
         source: "mcp",
@@ -201,14 +203,37 @@ describe("MCP server", () => {
       { source: "mcp", who: "local", op: "list", query: null, filters: { tag: "hr" }, results: 1, top: ["/hr/urlopy.md"] },
     ]);
   });
+
+  it("logs session connect with the client info and disconnect with the call count", async () => {
+    const { client, config } = await connect();
+    const sessions = () => readQueryLog(config).entries.filter(isSessionEntry);
+    const info = { name: "test", version: "0" };
+    expect(sessions()).toEqual([{ ts: expect.any(String), source: "mcp", who: "local", op: "connect", client: info }]);
+    await call(client, "search", { query: "backup" });
+    await call(client, "get", { path: "/x.md" }); // failed calls count
+    await call(client, "status"); // status counts
+    await client.close();
+    expect(sessions()[1]).toEqual({
+      ts: expect.any(String),
+      source: "mcp",
+      who: "local",
+      op: "disconnect",
+      client: info,
+      calls: 3,
+      ms: expect.any(Number),
+    });
+    expect(sessions()).toHaveLength(2);
+  });
 });
 
 describe("marian-knows serve", () => {
-  it("serves the knowledge base over stdio", async () => {
-    const { dir } = await connect();
+  it("serves the knowledge base over stdio; closing stdin ends the session", async () => {
+    const { dir, config } = await connect();
+    const before = readQueryLog(config).entries.length;
     const env: Record<string, string> = {};
-    for (const [k, v] of Object.entries(process.env)) if (v !== undefined && k !== "MARIAN_KNOWS_CONFIG") env[k] = v;
-    env.MARIAN_KNOWS_NO_LOG = "1";
+    for (const [k, v] of Object.entries(process.env)) {
+      if (v !== undefined && k !== "MARIAN_KNOWS_CONFIG" && k !== "MARIAN_KNOWS_NO_LOG") env[k] = v;
+    }
     const transport = new StdioClientTransport({
       command: process.execPath,
       args: ["--import", TSX, CLI, "serve"],
@@ -224,5 +249,8 @@ describe("marian-knows serve", () => {
     } finally {
       await client.close();
     }
+    const entries = readQueryLog(config).entries.slice(before);
+    expect(entries.map((e) => e.op)).toEqual(["connect", "search", "disconnect"]);
+    expect(entries[2]).toMatchObject({ client: { name: "test", version: "0" }, calls: 1 });
   });
 });

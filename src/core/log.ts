@@ -13,6 +13,7 @@ export const LOG_TOP = 5;
 
 export type LogSource = "cli" | "mcp";
 export type LogOp = "search" | "get" | "list";
+export type SessionOp = "connect" | "disconnect";
 
 /** One line of `queries-YYYY-MM-DD.jsonl`. Virtual paths only, never response content or disk paths. */
 export interface QueryLogEntry {
@@ -31,6 +32,38 @@ export interface QueryLogEntry {
   /** Up to `LOG_TOP` virtual paths, in result order. */
   top: string[];
   ms: number;
+}
+
+/** MCP client name and version from the `initialize` request. */
+export interface ClientInfo {
+  name: string;
+  version: string;
+}
+
+/** Start or end of an MCP session, in the same file as queries. */
+export interface SessionLogEntry {
+  ts: string;
+  source: "mcp";
+  who: string;
+  op: SessionOp;
+  /** Null when the client sent none. */
+  client: ClientInfo | null;
+  /** `disconnect` only: tool calls in the session, failed ones included. */
+  calls?: number;
+  /** `disconnect` only: session duration. */
+  ms?: number;
+}
+
+export type LogEntry = QueryLogEntry | SessionLogEntry;
+
+export const isSessionEntry = (e: LogEntry): e is SessionLogEntry => e.op === "connect" || e.op === "disconnect";
+
+export interface SessionRecord {
+  who: string;
+  op: SessionOp;
+  client: ClientInfo | null;
+  calls?: number;
+  ms?: number;
 }
 
 export interface QueryRecord {
@@ -77,6 +110,25 @@ export function logQuery(config: LoadedConfig, record: QueryRecord, now: Date = 
     top: record.paths.slice(0, LOG_TOP),
     ms: Math.round(record.ms),
   };
+  return appendEntry(config, entry, now);
+}
+
+/** Appends an MCP session start or end to today's (UTC) log. Same rules as `logQuery`. */
+export function logSession(config: LoadedConfig, record: SessionRecord, now: Date = new Date()): string[] {
+  if (logDisabled()) return [];
+  const entry: SessionLogEntry = {
+    ts: now.toISOString(),
+    source: "mcp",
+    who: record.who,
+    op: record.op,
+    client: record.client ? { name: record.client.name, version: record.client.version } : null,
+  };
+  if (record.calls !== undefined) entry.calls = record.calls;
+  if (record.ms !== undefined) entry.ms = Math.round(record.ms);
+  return appendEntry(config, entry, now);
+}
+
+function appendEntry(config: LoadedConfig, entry: LogEntry, now: Date): string[] {
   const dir = logDir(config);
   try {
     mkdirSync(dir, { recursive: true });
@@ -104,19 +156,19 @@ function pruneLogs(dir: string, now: Date): string[] {
 export interface ReadLogOptions {
   /** Entries from the last `days` × 24 h; default 7. */
   days?: number;
-  /** Only entries with no results. */
+  /** Only queries with no results; session entries are left out. */
   zero?: boolean;
 }
 
 export interface ReadLogResult {
   /** Oldest first. */
-  entries: QueryLogEntry[];
+  entries: LogEntry[];
   warnings: string[];
 }
 
 export const DEFAULT_LOG_DAYS = 7;
 
-/** Reads the query log. A missing log directory is an empty log; broken lines are skipped with a warning. */
+/** Reads the query log, session entries included. A missing log directory is an empty log; broken lines are skipped with a warning. */
 export function readQueryLog(config: LoadedConfig, options: ReadLogOptions = {}, now: Date = new Date()): ReadLogResult {
   const since = new Date(now.getTime() - (options.days ?? DEFAULT_LOG_DAYS) * DAY_MS).toISOString();
   const dir = logDir(config);
@@ -128,25 +180,25 @@ export function readQueryLog(config: LoadedConfig, options: ReadLogOptions = {},
     throw e;
   }
 
-  const entries: QueryLogEntry[] = [];
+  const entries: LogEntry[] = [];
   let broken = 0;
   for (const name of names.filter((n) => QUERY_FILE.test(n)).sort()) {
     // A file holds one UTC day; skip whole days before the window.
     if (QUERY_FILE.exec(name)![1]! < since.slice(0, 10)) continue;
     for (const line of readFileSync(path.join(dir, name), "utf8").split("\n")) {
       if (!line.trim()) continue;
-      let entry: QueryLogEntry;
+      let entry: LogEntry;
       try {
-        entry = JSON.parse(line) as QueryLogEntry;
+        entry = JSON.parse(line) as LogEntry;
       } catch {
         broken++;
         continue;
       }
-      if (typeof entry?.ts !== "string" || typeof entry.results !== "number") {
+      if (typeof entry?.ts !== "string" || (!isSessionEntry(entry) && typeof entry.results !== "number")) {
         broken++;
         continue;
       }
-      if (entry.ts < since || (options.zero && entry.results !== 0)) continue;
+      if (entry.ts < since || (options.zero && (isSessionEntry(entry) || entry.results !== 0))) continue;
       entries.push(entry);
     }
   }

@@ -83,7 +83,7 @@ in diagnostics (`scan --disk`, `status`).
 | `get <path>[#anchor]` | Print an indexed file unchanged, or one section of it                             |
 | `status`              | Project, config and index state (`--json`)                                        |
 | `destroy`             | Remove this config's index and query logs; the config and `.md` files stay        |
-| `log`                 | Show the query log (`--days`, `--zero`, `--json`)                                 |
+| `log`                 | Show the query log and MCP sessions (`--days`, `--zero`, `--json`)                |
 | `serve`               | Run the MCP server over stdio for AI agents                                       |
 | `help`                | Show help (also `--help`, `-h`)                                                   |
 
@@ -125,6 +125,9 @@ marian-knows search "pg_restore" --exact
 response content and no disk paths. Files older than 90 days are deleted on write; `destroy` removes the
 logs with the index. A failed write is a warning, never an error. `MARIAN_KNOWS_NO_LOG=1` turns the log off.
 
+MCP sessions go to the same file: `connect` with the client's name and version, `disconnect` with the number of
+tool calls and the session length. `--zero` leaves them out.
+
 ```bash
 marian-knows log                  # last 7 days, oldest first
 marian-knows log --zero --days 30 # queries with no results: gaps in the knowledge base
@@ -153,7 +156,8 @@ in which language, and when to check it. Without one, the agent only learns that
 
 Virtual paths only. Errors (invalid path, unknown anchor, missing index) come back as tool errors with the
 CLI message; a scope that covers no file adds a `warning:` text block. Calls go to the query log with
-`source: "mcp"` and `who: "local"`.
+`source: "mcp"` and `who: "local"`, framed by `connect` and `disconnect`. Over stdio a session lasts until the
+client closes stdin or the server gets SIGINT / SIGTERM; a killed server logs no `disconnect`.
 
 File content reaches the agent's context unchanged: whoever can write to the knowledge repo can steer
 connected agents (prompt injection), so treat write access to it as an admin right.

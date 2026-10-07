@@ -1,7 +1,16 @@
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { NO_LOG_ENV, loadConfig, logDir, logDisabled, logQuery, readQueryLog } from "../src/core/index.js";
+import {
+  NO_LOG_ENV,
+  loadConfig,
+  logDir,
+  logDisabled,
+  logQuery,
+  logSession,
+  readQueryLog,
+  type QueryLogEntry,
+} from "../src/core/index.js";
 import { makeTree } from "./helpers.js";
 
 const NOW = new Date("2026-10-07T10:00:00.000Z");
@@ -104,7 +113,7 @@ describe("query log", () => {
     logQuery(config, record({ query: "today" }), NOW);
     logQuery(config, record({ query: "hit", paths: ["/a.md"] }), ago(1));
 
-    const queries = (o: Parameters<typeof readQueryLog>[1]) => readQueryLog(config, o, NOW).entries.map((e) => e.query);
+    const queries = (o: Parameters<typeof readQueryLog>[1]) => readQueryLog(config, o, NOW).entries.map((e) => (e as QueryLogEntry).query);
     expect(queries({})).toEqual(["edge", "hit", "today"]);
     expect(queries({ days: 30 })).toEqual(["old", "edge", "hit", "today"]);
     expect(queries({ days: 1 })).toEqual(["hit", "today"]);
@@ -120,5 +129,26 @@ describe("query log", () => {
     const r = readQueryLog(config, {}, NOW);
     expect(r.entries).toHaveLength(1);
     expect(r.warnings).toEqual(["skipped 2 broken log line(s)"]);
+  });
+
+  it("session start and end go to the same file; --zero leaves them out", () => {
+    const { config } = project();
+    const client = { name: "claude-code", version: "2.1.0" };
+    logSession(config, { who: "local", op: "connect", client }, ago(0.1));
+    logQuery(config, record({ source: "mcp", who: "local" }), ago(0.05));
+    logSession(config, { who: "local", op: "disconnect", client, calls: 3, ms: 61_234.6 }, NOW);
+    logSession(config, { who: "local", op: "connect", client: null }, NOW);
+
+    const lines = readFileSync(path.join(logDir(config), "queries-2026-10-07.jsonl"), "utf8").trimEnd().split("\n");
+    expect(lines.map((l) => JSON.parse(l))).toEqual([
+      { ts: ago(0.1).toISOString(), source: "mcp", who: "local", op: "connect", client },
+      expect.objectContaining({ op: "search" }),
+      { ts: NOW.toISOString(), source: "mcp", who: "local", op: "disconnect", client, calls: 3, ms: 61235 },
+      { ts: NOW.toISOString(), source: "mcp", who: "local", op: "connect", client: null },
+    ]);
+    const r = readQueryLog(config, {}, NOW);
+    expect(r.warnings).toEqual([]);
+    expect(r.entries.map((e) => e.op)).toEqual(["connect", "search", "disconnect", "connect"]);
+    expect(readQueryLog(config, { zero: true }, NOW).entries.map((e) => e.op)).toEqual(["search"]);
   });
 });

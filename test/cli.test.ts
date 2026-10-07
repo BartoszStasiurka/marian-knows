@@ -530,6 +530,34 @@ describe.concurrent("query log", () => {
     expect(zero.stdout).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}  cli  search  0  "backup"  \{"tag":"x"\}\n$/);
   });
 
+  it("log prints MCP session start and end; --zero leaves them out", async () => {
+    const dir = makeTree({ "marian-knows.yml": "name: P\n" });
+    const logs = path.join(dir, ".marian-knows", "marian-knows", "logs");
+    mkdirSync(logs, { recursive: true });
+    const ts = new Date().toISOString();
+    const client = { name: "claude-code", version: "2.1.0" };
+    writeFileSync(
+      path.join(logs, `queries-${ts.slice(0, 10)}.jsonl`),
+      [
+        { ts, source: "mcp", who: "local", op: "connect", client },
+        { ts, source: "mcp", who: "local", op: "disconnect", client, calls: 4, ms: 125_000 },
+        { ts, source: "mcp", who: "local", op: "connect", client: null },
+      ]
+        .map((e) => JSON.stringify(e) + "\n")
+        .join(""),
+    );
+    const time = ts.slice(0, 19).replace("T", " ");
+    expect(await runCli(["log"], { cwd: dir })).toMatchObject({
+      code: 0,
+      stdout:
+        `${time}  local  connect  claude-code 2.1.0\n` +
+        `${time}  local  disconnect  claude-code 2.1.0  4 calls  2 min\n` +
+        `${time}  local  connect  -\n`,
+      stderr: "",
+    });
+    expect(await runCli(["log", "--zero"], { cwd: dir })).toMatchObject({ code: 1, stdout: "" });
+  });
+
   it("MARIAN_KNOWS_NO_LOG=1 leaves no log; empty log: exit 1 ([] with --json)", async () => {
     const dir = await project();
     await runCli(["search", "backup"], { cwd: dir });

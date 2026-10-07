@@ -7,11 +7,13 @@ import {
   get as getRef,
   list as listIndex,
   logQuery,
+  logSession,
   search as searchIndex,
   status as projectStatus,
   type DocFilterOptions,
   type LoadedConfig,
   type QueryRecord,
+  type SessionRecord,
 } from "./core/index.js";
 
 /** Most files one `search` call may return; keeps a careless limit from flooding the agent's context. */
@@ -85,10 +87,37 @@ export function createMcpServer(config: LoadedConfig, options: McpOptions): McpS
   const server = new McpServer({ name: "marian-knows", version: VERSION }, { instructions: instructions(config) });
   const annotations = { readOnlyHint: true, openWorldHint: false };
 
+  const warn = (warnings: string[]) => {
+    for (const w of warnings) console.error(`! warning: ${w}`);
+  };
   const log = (record: Omit<QueryRecord, "source" | "who">) => {
-    for (const w of logQuery(config, { source: "mcp", who: options.who, ...record })) {
-      console.error(`! warning: ${w}`);
-    }
+    warn(logQuery(config, { source: "mcp", who: options.who, ...record }));
+  };
+
+  // Session = from the client's `initialized` notification to the transport closing.
+  // Counts every tool call, failed ones and `status` included.
+  let started: number | null = null;
+  let calls = 0;
+  const logSessionEvent = (record: Omit<SessionRecord, "who" | "client">, now?: Date) => {
+    const client = server.server.getClientVersion() ?? null;
+    warn(logSession(config, { who: options.who, client, ...record }, now));
+  };
+  server.server.oninitialized = () => {
+    started = performance.now();
+    // A client that sends `initialized` without waiting for the `initialize` response can beat that request's
+    // handler, which stores the client info; wait one turn of the event loop for it, but log this moment as the time.
+    const now = new Date();
+    if (server.server.getClientVersion()) logSessionEvent({ op: "connect" }, now);
+    else setImmediate(() => logSessionEvent({ op: "connect" }, now));
+  };
+  server.server.onclose = () => {
+    if (started === null) return;
+    logSessionEvent({ op: "disconnect", calls, ms: performance.now() - started });
+    started = null;
+  };
+  const counted = (run: () => CallToolResult): CallToolResult => {
+    calls++;
+    return guarded(run);
   };
 
   server.registerTool(
@@ -126,7 +155,7 @@ How to query:
       annotations,
     },
     (args) =>
-      guarded(() => {
+      counted(() => {
         const started = performance.now();
         const filters = { ...filterOptions(args), limit: args.limit, exact: args.exact };
         const { hits, warnings } = searchIndex(config, args.query, { ...filters, snippets: true });
@@ -149,7 +178,7 @@ An unknown anchor returns an error listing the anchors the file has.`,
       annotations,
     },
     (args) =>
-      guarded(() => {
+      counted(() => {
         const started = performance.now();
         const doc = getRef(config, args.path);
         log({ op: "get", query: args.path, paths: [doc.path], ms: performance.now() - started });
@@ -167,7 +196,7 @@ directory or a tag when you do not know what to search for; filter with path, ex
       annotations,
     },
     (args) =>
-      guarded(() => {
+      counted(() => {
         const started = performance.now();
         const filters = filterOptions(args);
         const { docs, warnings } = listIndex(config, filters);
@@ -185,7 +214,7 @@ of files and sections, index time and age in seconds. Use it when results look s
       annotations,
     },
     () =>
-      guarded(() => {
+      counted(() => {
         // Disk paths of the config and the source directory stay on the server.
         const { config: _config, path: _path, ...rest } = projectStatus(config);
         return json(rest);
@@ -195,8 +224,15 @@ of files and sections, index time and age in seconds. Use it when results look s
   return server;
 }
 
-/** Serves the knowledge base over stdio until the client disconnects. Diagnostics go to stderr only. */
+/**
+ * Serves the knowledge base over stdio until the client disconnects. Diagnostics go to stderr only.
+ * The session ends when stdin closes or on SIGINT / SIGTERM; both close the server, which logs `disconnect`.
+ */
 export async function serveStdio(config: LoadedConfig): Promise<void> {
   const server = createMcpServer(config, { who: "local" });
   await server.connect(new StdioServerTransport());
+  process.stdin.once("end", () => void server.close());
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.once(signal, () => void server.close().finally(() => process.exit(0)));
+  }
 }

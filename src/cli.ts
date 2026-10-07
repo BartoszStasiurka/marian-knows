@@ -9,6 +9,7 @@ import {
   get as getRef,
   indexDirName,
   initConfig,
+  isSessionEntry,
   list as listIndex,
   loadConfig,
   logQuery,
@@ -20,9 +21,9 @@ import {
   syncIndex,
   type DocFilterOptions,
   type LoadedConfig,
+  type LogEntry,
   type ParsedDoc,
   type ProjectStatus,
-  type QueryLogEntry,
   type QueryRecord,
 } from "./core/index.js";
 import { serveStdio } from "./mcp.js";
@@ -39,7 +40,7 @@ Commands:
   get <path>[#anchor]   Print an indexed file, or one section of it, by virtual path
   status                Show project, config and index state
   destroy               Remove this config's index and query logs; the config stays
-  log                   Show the query log (search, get, list), last 7 days
+  log                   Show the query log (search, get, list, MCP sessions), last 7 days
   serve                 Run the MCP server over stdio (tools: search, get, list, status)
   help                  Show this help
 
@@ -229,10 +230,16 @@ function get(ref: string | undefined, values: { config?: string; "max-chars"?: s
   return 0;
 }
 
-function formatLogEntry(e: QueryLogEntry): string {
+function formatLogEntry(e: LogEntry): string {
+  const time = e.ts.slice(0, 19).replace("T", " ");
+  if (isSessionEntry(e)) {
+    const client = e.client ? `${e.client.name} ${e.client.version}` : "-";
+    const end = e.op === "disconnect" ? `  ${e.calls ?? 0} calls  ${formatAge(Math.round((e.ms ?? 0) / 1000))}` : "";
+    return `${time}  ${e.who}  ${e.op}  ${client}${end}`;
+  }
   const filters = Object.keys(e.filters ?? {}).length ? `  ${JSON.stringify(e.filters)}` : "";
   const query = e.query === null ? "-" : JSON.stringify(e.query);
-  return `${e.ts.slice(0, 19).replace("T", " ")}  ${e.who}  ${e.op}  ${e.results}  ${query}${filters}`;
+  return `${time}  ${e.who}  ${e.op}  ${e.results}  ${query}${filters}`;
 }
 
 function log(values: { config?: string; days?: string; zero?: boolean; json?: boolean }): number {
