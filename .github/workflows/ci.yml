@@ -21,3 +21,32 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
+  # Publishes the server image to GHCR after green tests on main: tags `main` (latest build) and `sha-<commit>`.
+  image:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/bartoszstasiurka/marian-knows   # image names must be lowercase
+          tags: |
+            type=raw,value=main
+            type=sha,format=short
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
