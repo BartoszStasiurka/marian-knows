@@ -18,6 +18,7 @@ import {
   scanSource,
   search as searchIndex,
   status as projectStatus,
+  syncGitSource,
   syncIndex,
   type DocFilterOptions,
   type LoadedConfig,
@@ -42,7 +43,7 @@ Commands:
   init <project_name>   Create a minimal marian-knows.yml (never overwrites)
   scan                  Scan the source directory and print virtual paths (dry run, no index)
   parse <file>          Parse a Markdown file given by disk path (diagnostic, no config needed)
-  index [--full]        Sync the index (.marian-knows/<config name>/ next to the config)
+  index [--full]        Pull the git source if configured, then sync the index (.marian-knows/<config name>/)
   search <query>        Search the index, one virtual path per line (exit 1: no results)
   list                  List indexed files sorted by path (exit 1: no files)
   get <path>[#anchor]   Print an indexed file, or one section of it, by virtual path
@@ -154,8 +155,19 @@ async function scan(values: { config?: string; json?: boolean; disk?: boolean })
 }
 
 async function index(values: { config?: string; full?: boolean }): Promise<number> {
-  const config = requireConfig(values.config);
+  let config = requireConfig(values.config);
   if (!config) return 2;
+  if (config.git) {
+    const g = await syncGitSource(config.git, (line) => console.error(line));
+    warn(g.warnings);
+    // Loaded before a first clone, the config still says the source directory does not exist.
+    config = loadConfig(config.configPath);
+    if (!config.sourceExists) {
+      // Indexing a missing directory would empty the index; a stale base beats no base.
+      warn([`not indexing: ${config.sourceDir} does not exist; the previous index stays`]);
+      return 0;
+    }
+  }
   const started = performance.now();
   const r = await syncIndex(config, { full: values.full });
   const seconds = ((performance.now() - started) / 1000).toFixed(1);

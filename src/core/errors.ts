@@ -63,3 +63,11 @@ export class TokenError extends Error {
     this.name = "TokenError";
   }
 }
+
+/** Cloning or checking the knowledge repo failed in a way that leaves nothing sensible to index. */
+export class GitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GitError";
+  }
+}

@@ -4,3 +4,4 @@ coverage/
 .marian-knows/
 .env
 .DS_Store
+_tmp/

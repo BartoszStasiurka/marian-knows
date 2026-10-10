@@ -10,7 +10,7 @@ COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
 RUN npm run build && npm prune --omit=dev
 
-# Runtime: node, git and ssh for the knowledge repo, nothing else.
+# Runtime: node, plus git and ssh (with ssh-keygen) for the git source of `marian-knows index`, nothing else.
 FROM node:20-bookworm-slim
 RUN apt-get update \
   && apt-get install -y --no-install-recommends git openssh-client ca-certificates \
@@ -24,8 +24,6 @@ COPY docker/marian-knows.sh /usr/local/bin/marian-knows
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/marian-knows
 
 ENV MARIAN_KNOWS_CONFIG=/data/marian-knows.yml \
-  KNOWLEDGE_DIR=/data/knowledge \
-  KNOWLEDGE_BRANCH=main \
   PORT=3000
 # Starts as root only to fix /data ownership; entrypoint.sh and marian-knows switch to `node` (UID 1000).
 VOLUME /data

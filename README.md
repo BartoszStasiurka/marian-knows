@@ -59,6 +59,23 @@ exclude:                        # optional, a glob or a list of globs relative t
 - Files over 1 MB and names containing `#` or `?` are skipped with a warning.
 - A missing `path` directory is a warning, not an error.
 
+### Git source
+
+`index` can clone the source directory from a git repo and fast-forward it on every run:
+
+```yaml
+path: ./knowledge                 # the working copy: cloned here, indexed from here (required with git)
+git:
+  url: git@git.example.com:team/knowledge.git
+  branch: main                    # optional, default main
+  path: docs                      # optional: index only this directory of the repo (sparse checkout)
+  deployKey: ./deploy_key         # optional: private key file; created on the first run if missing
+```
+
+The clone is shallow and a normal working copy: you can work in it. `index` never discards local changes; it
+warns and indexes what is on disk when the copy has changes, is on another branch or cannot fast-forward. Virtual
+paths start at `git.path`. Only `index` runs git.
+
 Config lookup: `--config <file>`, then `MARIAN_KNOWS_CONFIG`, then `marian-knows.yml` searched upwards from the
 current directory. The index lives in `.marian-knows/<config file name without extension>/` next to the config
 (`marian-knows.yml` → `.marian-knows/marian-knows/index.db`), so several configs in one directory, e.g.

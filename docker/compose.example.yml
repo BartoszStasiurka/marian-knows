@@ -1,14 +1,13 @@
-# Copy to the server as compose.yml, next to the data/ directory.
+# Copy to the server as compose.yml, next to the data/ directory. No edits needed: the knowledge repo is set in
+# data/marian-knows.yml.
 services:
   marian-knows:
-    image: ghcr.io/bartoszstasiurka/marian-knows:main   # pin a sha-… tag to hold a version
-    restart: unless-stopped        # back up after a crash and after a server reboot
-    init: true                     # forwards SIGTERM to node for a clean shutdown
+    image: ghcr.io/bartoszstasiurka/marian-knows:main # pin a sha-… tag to hold a version
+    restart: unless-stopped # back up after a crash and after a server reboot
+    init: true # forwards SIGTERM to node for a clean shutdown
     ports:
-      - "127.0.0.1:3000:3000"      # localhost only; the reverse proxy faces the internet
+      - "127.0.0.1:3000:3000" # localhost only; the reverse proxy faces the internet
     volumes:
-      - ./data:/data               # config, tokens, deploy key, knowledge clone, index, logs
+      - ./data:/data # config, tokens, deploy key, knowledge clone, index, logs
     environment:
-      TZ: Europe/Warsaw            # times in `docker compose logs`; query logs stay in UTC
-      KNOWLEDGE_REPO: git@git.example.com:team/knowledge.git
-      KNOWLEDGE_BRANCH: main
+      TZ: Europe/Warsaw # times in `docker compose logs`; query logs stay in UTC

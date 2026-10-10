@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -56,4 +56,48 @@ export function runCli(args: string[], opts: { cwd: string; log?: boolean }): Pr
     child.on("error", reject);
     child.on("close", (code) => resolve({ code, stdout, stderr }));
   });
+}
+
+/** Runs git synchronously with a fixed identity; returns trimmed stdout. */
+export function git(cwd: string, ...args: string[]): string {
+  return execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", ...args], {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
+}
+
+export interface Origin {
+  /** file:// URL of the bare repo. */
+  url: string;
+  dir: string;
+  /** Commits the files (rel path -> content) on top of the branch and pushes; returns the sha. */
+  commit(files: Record<string, string>, message?: string): string;
+}
+
+/** A bare "remote" repo in a temp dir, with one commit holding `files`. */
+export function makeOrigin(files: Record<string, string>, opts: { branch?: string; name?: string } = {}): Origin {
+  const branch = opts.branch ?? "main";
+  const root = makeTree();
+  const dir = path.join(root, opts.name ?? "origin.git");
+  mkdirSync(dir);
+  git(dir, "init", "-q", "--bare", "-b", branch);
+  // Lets `clone --filter` work over file:// without a "filtering not recognized" warning.
+  git(dir, "config", "uploadpack.allowFilter", "true");
+  const work = path.join(root, "work");
+  git(root, "init", "-q", "-b", branch, work);
+  git(work, "remote", "add", "origin", dir);
+  const commit = (more: Record<string, string>, message = "update"): string => {
+    for (const [rel, content] of Object.entries(more)) {
+      const full = path.join(work, rel);
+      mkdirSync(path.dirname(full), { recursive: true });
+      writeFileSync(full, content);
+    }
+    git(work, "add", "-A");
+    git(work, "commit", "-q", "-m", message);
+    git(work, "push", "-q", "origin", branch);
+    return git(work, "rev-parse", "HEAD");
+  };
+  commit(files, "initial");
+  return { url: pathToFileURL(dir).href, dir, commit };
 }

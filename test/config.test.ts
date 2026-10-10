@@ -32,6 +32,7 @@ describe("loadConfig", () => {
       sourceDir: dir,
       sourceExists: true,
       exclude: [],
+      git: null,
     });
   });
 
@@ -142,6 +143,72 @@ describe("loadConfig", () => {
   it("reports an empty config file", () => {
     const dir = makeTree();
     expect(errorsOf(() => loadConfig(write(dir, ""))).length).toBeGreaterThan(0);
+  });
+});
+
+describe("loadConfig git", () => {
+  it("reads a git block with defaults", () => {
+    const dir = makeTree();
+    const cfg = loadConfig(write(dir, 'name: T\npath: ./kb\ngit:\n  url: "git@h:t/kb.git"\n'));
+    expect(cfg.git).toEqual({
+      url: "git@h:t/kb.git",
+      branch: "main",
+      path: "",
+      repoDir: path.join(dir, "kb"),
+      deployKey: null,
+    });
+    expect(cfg.sourceDir).toBe(path.join(dir, "kb"));
+    expect(cfg.sourceExists).toBe(false);
+  });
+
+  it("indexes git.path inside the clone", () => {
+    const dir = makeTree();
+    const cfg = loadConfig(write(dir, "name: T\npath: ./kb\ngit:\n  url: u\n  branch: dev\n  path: /docs/\n"));
+    expect(cfg.git?.path).toBe("docs");
+    expect(cfg.git?.branch).toBe("dev");
+    expect(cfg.sourceDir).toBe(path.join(dir, "kb", "docs"));
+  });
+
+  it("treats a git.path of . as the repo root", () => {
+    const dir = makeTree();
+    const cfg = loadConfig(write(dir, "name: T\npath: ./kb\ngit:\n  url: u\n  path: ./\n"));
+    expect(cfg.git?.path).toBe("");
+    expect(cfg.sourceDir).toBe(path.join(dir, "kb"));
+  });
+
+  it("resolves deployKey against the config dir", () => {
+    const dir = makeTree();
+    const cfg = loadConfig(write(dir, "name: T\npath: ./kb\ngit:\n  url: u\n  deployKey: ./deploy_key\n"));
+    expect(cfg.git?.deployKey).toBe(path.join(dir, "deploy_key"));
+  });
+
+  it("requires path with git", () => {
+    const dir = makeTree();
+    expect(errorsOf(() => loadConfig(write(dir, "name: T\ngit:\n  url: u\n")))).toContain(
+      "path: required when git is set",
+    );
+  });
+
+  it("rejects git.path escaping the repo", () => {
+    const dir = makeTree();
+    const errors = errorsOf(() => loadConfig(write(dir, "name: T\npath: ./kb\ngit:\n  url: u\n  path: ../x\n")));
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/^git > path: /);
+  });
+
+  it("rejects a git.branch that looks like an option", () => {
+    const dir = makeTree();
+    expect(errorsOf(() => loadConfig(write(dir, "name: T\npath: ./kb\ngit:\n  url: u\n  branch: --upload-pack=x\n")))).toEqual([
+      "git > branch: must not start with -",
+    ]);
+  });
+
+  it("rejects unknown git fields and a missing url, all at once", () => {
+    const dir = makeTree();
+    const errors = errorsOf(() => loadConfig(write(dir, "name: T\npath: ./kb\ngit:\n  branch: main\n  foo: 1\n")));
+    expect(errors).toHaveLength(2);
+    expect(errors.some((e) => e.startsWith("git > url:"))).toBe(true);
+    expect(errors.some((e) => e.startsWith("git:") && e.includes("foo"))).toBe(true);
   });
 });
 

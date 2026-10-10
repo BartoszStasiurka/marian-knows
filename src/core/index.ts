@@ -10,6 +10,7 @@ export {
 export {
   ConfigError,
   DocNotFoundError,
+  GitError,
   IndexLockedError,
   IndexMissingError,
   InvalidPathError,
@@ -58,6 +59,7 @@ export {
   slugify,
 } from "./parse.js";
 export { MAX_FILE_BYTES, scanSource } from "./scan.js";
+export { redactUrl, syncGitSource } from "./git.js";
 export {
   DEFAULT_LIMIT,
   FALLBACK_THRESHOLD,
@@ -85,6 +87,7 @@ export {
   tokensPath,
 } from "./tokens.js";
 export type { DocFilterOptions } from "./filter.js";
+export type { GitSyncResult } from "./git.js";
 export type { IndexOptions } from "./indexer.js";
 export type { DocRef, GetOptions, GetResult } from "./get.js";
 export type { ListItem, ListResult } from "./list.js";
@@ -107,5 +110,5 @@ export type {
 export type { PreparedQuery, SearchHit, SearchOptions, SearchResult } from "./search.js";
 export type { ProjectStatus } from "./status.js";
 export type { TokenEntry, TokenInfo } from "./tokens.js";
-export type { IndexResult, LoadedConfig, ParsedDoc, ScanResult, ScannedFile, Section } from "./types.js";
+export type { GitSource, IndexResult, LoadedConfig, ParsedDoc, ScanResult, ScannedFile, Section } from "./types.js";
 export { validateVirtualPath } from "./virtual-path.js";

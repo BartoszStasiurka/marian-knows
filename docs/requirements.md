@@ -30,6 +30,7 @@ exclude:
 | `description` | opis dla agenta: co jest w bazie i kiedy jej używać; opcjonalny                       |
 | `path`    | katalog źródłowy; względny do katalogu z `marian-knows.yml` albo absolutny; opcjonalny     |
 | `exclude` | string lub lista globów względnych do `path`; opcjonalne                                  |
+| `git`     | repo gita, z którego `index` klonuje i aktualizuje `path`; opcjonalne                      |
 
 **`name`**
 - Po usunięciu białych znaków z brzegów: od 1 do 128 znaków, bez znaków sterujących.
@@ -45,6 +46,25 @@ exclude:
 - Istniejące `path` musi wskazywać katalog; plik to błąd konfiguracji.
 - Nieistniejący katalog nie jest błędem: `scan` wypisuje ostrzeżenie i nie znajduje plików.
 - Błąd dostępu do katalogu (np. brak uprawnień) jest błędem konfiguracji.
+
+**`git`**
+
+```yaml
+path: ./wiedza               # kopia robocza: tu klon, stąd indeksujemy
+git:
+  url: git@git.firma.pl:zespol/wiedza.git
+  branch: main               # opcjonalne, domyślnie main
+  path: docs                 # opcjonalne: indeksuj tylko ten katalog repo
+  deployKey: ./deploy_key    # opcjonalne: ścieżka do pliku z kluczem prywatnym, nigdy sam klucz
+```
+
+- `url`: wymagany, dowolny adres, który przyjmuje `git clone` (ssh, https, file). `branch`: niepusty, nie zaczyna się od `-`, domyślnie `main`.
+- `git.path`: katalog wewnątrz repo. Wiodący `/` jest pomijany (`/docs` = `docs`), `.` i pusty oznaczają korzeń repo. Segment `..`, `\` i znaki sterujące to błąd konfiguracji.
+- `deployKey`: względny do katalogu z `marian-knows.yml` albo absolutny.
+- Z `git` pole `path` jest **wymagane**: klon w katalogu konfiguracji wymieszałby repo z konfiguracją, tokenami i `.marian-knows/`. `path` dalej jest stringiem i oznacza kopię roboczą; nieistniejący katalog to normalny stan przed pierwszym klonem.
+- Katalog indeksowany to `path` + `git.path`; ścieżki wirtualne liczą się od niego (`git.path: docs` i plik `docs/api/x.md` dają `/api/x.md`).
+- Kopia robocza to zwykłe repo, można w nim pracować bez MarianKnows. Wczytanie konfiguracji nie uruchamia gita; robi to tylko `index` (sekcja 4).
+- Usunięcie bloku `git` zostawia działającą konfigurację na lokalnym katalogu.
 
 **Walidacja:** nieznane pola są błędem; stare pole `sources` jest odrzucane z osobnym komunikatem. Walidacja zbiera wszystkie błędy naraz, kod wyjścia 2.
 
@@ -101,6 +121,30 @@ CREATE VIRTUAL TABLE sections_fts USING fts5(         -- rowid = sections.id
 
 **Pełna przebudowa:** przy niezgodności `schema_version` (schemat, tokenizer, parser sekcji) albo ręcznie `marian-knows index --full`.
 
+**Źródło z gita.** Gdy konfiguracja ma blok `git`, `index` przed skanem aktualizuje kopię roboczą. Robi to wyłącznie `index`; `scan`, `search`, `status` i `serve` nigdy nie uruchamiają gita. Git jest wywoływany jako program `git` (brak programu: błąd `git not found; install git or remove the git block`), zawsze z `GIT_TERMINAL_PROMPT=0`, więc nigdy nie czeka na hasło. Dane logowania w adresach `http(s)://` są w wyjściu zastępowane `***@`.
+
+- **Brak `path` albo pusty katalog:** `git clone --depth 1 --filter=blob:none --single-branch --branch <branch>`, z `--sparse` i `sparse-checkout set --cone <git.path>`, gdy ustawiono `git.path`. Klon powstaje obok, w `<path>.clone-<pid>`, i jest przemianowywany na `path` dopiero po zakończeniu; pozostałości po przerwanych klonach (`<path>.clone-*`) są usuwane. Nieudany klon to błąd (kod 2), nic nie jest indeksowane i nic nie zostaje na dysku.
+- **`path` istnieje:** musi być korzeniem repo (`rev-parse --show-toplevel`, porównane po `realpath`) z `remote.origin.url` równym `git.url` (bez końcowego `/` i `.git`). Inaczej błąd (kod 2): `path exists and is not a git repository: <path>` albo `<path> is a clone of <origin>, config says <url>; remove the directory to re-clone`. MarianKnows nie pisze do katalogu, którego sam nie sklonował.
+- Potem aktualizacja: `fetch origin <branch>` i `merge --ff-only FETCH_HEAD`. Nigdy `reset` ani `clean`, bo w kopii roboczej ktoś może pracować. Poniższe sytuacje dają ostrzeżenie, a indeks powstaje z tego, co leży na dysku:
+
+| Sytuacja | Ostrzeżenie |
+| --- | --- |
+| niezacommitowane zmiany | `local changes in <path>, not updating` |
+| inna gałąź albo detached HEAD | `<path> is on <gałąź\|detached HEAD>, config says <branch>; not updating` |
+| `fetch` się nie udał (sieć, klucz, serwer) | `fetch failed, indexing the previous content: <komunikat gita>` |
+| brak fast-forward (rozjechana historia, force push) | `cannot fast-forward <path>; indexing the local content` |
+| `git.path` nie istnieje w repo | `git.path not found in the repository: <git.path>` |
+
+- Klon rzadki (`core.sparseCheckout`) przy każdej aktualizacji dostaje `sparse-checkout set --cone <git.path>`, więc zmiana `git.path` nie wymaga ponownego klonowania. Pełny klon zrobiony ręcznie zostaje pełny.
+- Gdy po kroku git katalog indeksowany (`path` + `git.path`) nie istnieje, `index` nie rusza indeksu: ostrzeżenie `not indexing: <katalog> does not exist; the previous index stays`, kod 0. Literówka w `git.path` nie opróżnia działającej bazy.
+- Wyjście na stderr: `git: cloning <url> (<branch>)` przy klonie i zawsze na końcu `git: <url> (<branch>) at <krótki sha> <data commita ISO>`.
+
+**Deploy key.** Tylko przy ustawionym `git.deployKey`; bez niego git używa zwykłego środowiska użytkownika (`~/.ssh`, agent, config).
+- Brak pliku: `index` generuje klucz (`ssh-keygen -t ed25519`, uprawnienia `600`), wypisuje klucz publiczny z prośbą o dodanie go w repo jako deploy key tylko do odczytu i kończy się kodem 2 bez wołania gita.
+- Klucz z uprawnieniami dla grupy lub innych dostaje `chmod 600` (ssh odrzuca takie klucze).
+- `GIT_SSH_COMMAND` używa tylko tego klucza (`IdentitiesOnly`), `BatchMode`, `ConnectTimeout=15` i własnego pliku `<deployKey>.known_hosts` z `StrictHostKeyChecking=accept-new`.
+- `Permission denied (publickey)`: komunikat powtarza klucz publiczny z `<deployKey>.pub`. Zmieniony klucz hosta: jedna linia `the git host key has changed; if expected, delete <deployKey>.known_hosts` zamiast banera ssh.
+
 **Odporność i współbieżność:** WAL (`search` działa w trakcie `index`), blokada przed równoległymi `index`, nieczytelny plik to ostrzeżenie i kontynuacja. `status` pokazuje wiek indeksu.
 - Blokada to plik `index.lock` w katalogu bazy (`.marian-knows/<nazwa>/`) z PID właściciela, zakładany atomowo i usuwany po zakończeniu. Gdy trzyma go żywy proces, `index` kończy się błędem `index is already running (pid N)` (kod 2); blokada po martwym procesie jest przejmowana.
 - Plik, którego nie da się odczytać, jest traktowany jak nieobecny: jego poprzednia wersja znika z indeksu. Plik bez zmian `mtime` i `size` nie jest czytany, więc zostaje.
@@ -130,7 +174,7 @@ CREATE VIRTUAL TABLE sections_fts USING fts5(         -- rowid = sections.id
 marian-knows init <project_name>      # tworzy minimalny marian-knows.yml z polem name
 marian-knows scan [--json] [--disk]   # pliki z katalogu źródłowego (bez indeksu)
 marian-knows parse <file> [--json]    # parsowanie pliku wskazanego ścieżką dyskową
-marian-knows index [--full]           # (re)indeksowanie
+marian-knows index [--full]           # (re)indeksowanie, wcześniej aktualizacja źródła z gita
 marian-knows search <query> [opcje]   # pliki wg rankingu
 marian-knows list [opcje]             # pliki z indeksu, posortowane po ścieżce
 marian-knows get <path>[#anchor]      # zawartość pliku albo jednej sekcji z indeksu (ścieżka wirtualna)

@@ -3,7 +3,7 @@ import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { ConfigError } from "./errors.js";
-import type { LoadedConfig } from "./types.js";
+import type { GitSource, LoadedConfig } from "./types.js";
 import { CONTROL_CHARS } from "./virtual-path.js";
 
 export const CONFIG_FILENAME = "marian-knows.yml";
@@ -11,14 +11,38 @@ export const CONFIG_ENV = "MARIAN_KNOWS_CONFIG";
 export const MAX_NAME_LENGTH = 128;
 export const MAX_DESCRIPTION_LENGTH = 2000;
 
+const GitSchema = z
+  .object({
+    url: z.string().trim().min(1),
+    branch: z
+      .string()
+      .trim()
+      .min(1)
+      .refine((b) => !b.startsWith("-"), "must not start with -")
+      .default("main"),
+    path: z.string().optional(),
+    deployKey: z.string().min(1).optional(),
+  })
+  .strict();
+
 const ConfigSchema = z
   .object({
     name: z.string(),
     description: z.string().optional(),
     path: z.string().min(1).optional(),
     exclude: z.union([z.string(), z.array(z.string())]).optional(),
+    git: GitSchema.optional(),
   })
   .strict();
+
+/** `/docs/` -> `docs`, `.` -> "" (repo root). Returns an error message for paths that leave the repo. */
+function normalizeGitPath(raw: string): { path: string } | { error: string } {
+  if (raw.includes("\\")) return { error: "must use / as the separator" };
+  if (CONTROL_CHARS.test(raw)) return { error: "must not contain control characters" };
+  const segments = raw.split("/").filter((s) => s !== "" && s !== ".");
+  if (segments.includes("..")) return { error: "must stay inside the repository (no ..)" };
+  return { path: segments.join("/") };
+}
 
 function formatIssue(issue: z.ZodIssue): string {
   const where = issue.path.length ? issue.path.map(String).join(" > ") : "(root)";
@@ -91,7 +115,22 @@ export function loadConfig(configPath: string): LoadedConfig {
     errors.push(`description: longer than ${MAX_DESCRIPTION_LENGTH} characters`);
   }
 
-  const sourceDir = path.resolve(configDir, parsed.data.path ?? ".");
+  let git: GitSource | null = null;
+  if (parsed.data.git) {
+    const g = parsed.data.git;
+    if (parsed.data.path === undefined) errors.push("path: required when git is set");
+    const gitPath = normalizeGitPath(g.path ?? "");
+    if ("error" in gitPath) errors.push(`git > path: ${gitPath.error}`);
+    git = {
+      url: g.url,
+      branch: g.branch,
+      path: "path" in gitPath ? gitPath.path : "",
+      repoDir: path.resolve(configDir, parsed.data.path ?? "."),
+      deployKey: g.deployKey === undefined ? null : path.resolve(configDir, g.deployKey),
+    };
+  }
+
+  const sourceDir = git ? path.join(git.repoDir, git.path) : path.resolve(configDir, parsed.data.path ?? ".");
   let sourceExists = false;
   try {
     const st = statSync(sourceDir);
@@ -114,5 +153,6 @@ export function loadConfig(configPath: string): LoadedConfig {
     sourceDir,
     sourceExists,
     exclude: exclude === undefined ? [] : typeof exclude === "string" ? [exclude] : exclude,
+    git,
   };
 }

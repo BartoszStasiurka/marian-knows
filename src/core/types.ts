@@ -9,6 +9,21 @@ export interface LoadedConfig {
   sourceDir: string;
   sourceExists: boolean;
   exclude: string[];
+  /** Where the source directory is cloned from; null for a plain local directory. */
+  git: GitSource | null;
+}
+
+/** The `git` block of the config, resolved. */
+export interface GitSource {
+  url: string;
+  /** Default `main`. */
+  branch: string;
+  /** Directory inside the repo that gets indexed; "" is the repo root. No leading or trailing `/`. */
+  path: string;
+  /** Absolute path of the working copy: the config's top-level `path`. */
+  repoDir: string;
+  /** Absolute path of the private key file; null uses the user's own ssh setup. */
+  deployKey: string | null;
 }
 
 export interface ScannedFile {

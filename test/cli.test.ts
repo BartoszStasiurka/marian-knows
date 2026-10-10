@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { makeTree, runCli } from "./helpers.js";
+import { makeOrigin, makeTree, runCli } from "./helpers.js";
 
 /** Every file under dir with its content, for detecting side effects. */
 function snapshot(dir: string): Record<string, string> {
@@ -727,5 +727,62 @@ describe.concurrent("exit codes", () => {
     const status = await runCli(["status", "--json"], { cwd: dir });
     expect(status.code).toBe(0);
     expect(JSON.parse(status.stdout).index).toBe("outdated");
+  });
+});
+
+describe.concurrent("index with git", () => {
+  function setup(url: string) {
+    const dir = makeTree();
+    writeFileSync(path.join(dir, "marian-knows.yml"), `name: T\npath: ./kb\ngit:\n  url: ${JSON.stringify(url)}\n  path: docs\n`);
+    return dir;
+  }
+
+  it("clones and indexes", async () => {
+    const origin = makeOrigin({ "docs/a.md": "# Alpha", "README.md": "# Root" });
+    const dir = setup(origin.url);
+    const r = await runCli(["index"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stderr).toContain(`git: cloning ${origin.url} (main)`);
+    expect(r.stderr).toMatch(/git: .* at [0-9a-f]{7,} /);
+    expect(r.stdout).toContain("Files: 1");
+    expect((await runCli(["scan"], { cwd: dir })).stdout.trim()).toBe("/a.md");
+  });
+
+  it("prints git warnings and still indexes", async () => {
+    const origin = makeOrigin({ "docs/a.md": "# Alpha" });
+    const dir = setup(origin.url);
+    expect((await runCli(["index"], { cwd: dir })).code).toBe(0);
+    writeFileSync(path.join(dir, "kb/docs/a.md"), "# Local");
+    const r = await runCli(["index"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stderr).toContain("warning: local changes in");
+    expect(r.stdout).toContain("~ 1 changed");
+  });
+
+  it("git errors exit 2", async () => {
+    const dir = setup(`file://${makeTree()}/missing.git`);
+    const r = await runCli(["index"], { cwd: dir });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/^git: cloning .*\nerror: cannot clone /);
+    expect(existsSync(path.join(dir, ".marian-knows"))).toBe(false);
+  });
+
+  it("keeps the previous index when git.path is missing", async () => {
+    const origin = makeOrigin({ "docs/a.md": "# Alpha" });
+    const dir = setup(origin.url);
+    expect((await runCli(["index"], { cwd: dir })).code).toBe(0);
+    writeFileSync(path.join(dir, "marian-knows.yml"), `name: T\npath: ./kb\ngit:\n  url: ${JSON.stringify(origin.url)}\n  path: doc\n`);
+    const r = await runCli(["index"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.stderr).toContain("git.path not found in the repository: doc");
+    expect(r.stderr).toContain("not indexing");
+    expect((await runCli(["list"], { cwd: dir })).stdout.trim()).toBe("/a.md");
+  });
+
+  it("scan does not touch git", async () => {
+    const dir = setup("file:///nowhere.git");
+    const r = await runCli(["scan"], { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(existsSync(path.join(dir, "kb"))).toBe(false);
   });
 });

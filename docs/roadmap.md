@@ -221,6 +221,16 @@ The container is disposable; all state lives on volumes, so a rebuild replaces c
   restart, not a rebuild (server instructions are built at start); `token add` via `docker compose exec`
 - [ ] Connection guide: Claude Code, Claude Desktop / claude.ai, custom Agent SDK agents
 
+## 15. Git source
+
+Spec: `docs/superpowers/specs/2026-10-08-git-source-design.md`. Comes before 13: stage 13 calls the same git step from
+`serve`.
+
+- [ ] `git` block in the config (`url`, `branch`, `path`, `deployKey`); top-level `path` is the working copy
+- [ ] `index` clones (shallow, partial, sparse for `git.path`) or fast-forwards; never discards local changes
+- [ ] Deploy key: generated when missing, used through `GIT_SSH_COMMAND`, host keys in `<deployKey>.known_hosts`
+- [ ] Docker entrypoint without git logic; `compose.yml` copied without edits
+
 ## Later (not planned)
 
 Public/internal split, multiple knowledge bases per server, OAuth (JWT issued by an auth server),
