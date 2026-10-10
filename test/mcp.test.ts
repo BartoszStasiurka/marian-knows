@@ -227,6 +227,34 @@ describe("MCP server", () => {
 });
 
 describe("marian-knows serve", () => {
+  it("builds a missing index at start, in the background", async () => {
+    const dir = makeTree({ "marian-knows.yml": "name: T\n", "a.md": "# Alpha\n\nalpha text" });
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: ["--import", TSX, CLI, "serve"],
+      cwd: dir,
+      env: { ...(process.env as Record<string, string>), MARIAN_KNOWS_CONFIG: "", MARIAN_KNOWS_NO_LOG: "1" },
+      stderr: "pipe",
+    });
+    let stderr = "";
+    transport.stderr?.on("data", (d: Buffer) => (stderr += d.toString()));
+    const client = new Client({ name: "test", version: "0" });
+    await client.connect(transport);
+    try {
+      const end = Date.now() + 10_000;
+      for (;;) {
+        const r = await call(client, "status", {});
+        if ((parsed(r) as { index: string }).index === "ok") break;
+        if (Date.now() > end) throw new Error("index not built");
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      expect((parsed(await call(client, "list", {})) as { path: string }[]).map((d) => d.path)).toEqual(["/a.md"]);
+      expect(stderr).toMatch(/index: 1 files, \+ 1 added/);
+    } finally {
+      await client.close();
+    }
+  });
+
   it("serves the knowledge base over stdio; closing stdin ends the session", async () => {
     const { dir, config } = await connect();
     const before = readQueryLog(config).entries.length;

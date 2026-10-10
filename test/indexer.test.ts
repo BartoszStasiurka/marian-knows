@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
 import { chmodSync, existsSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -357,6 +358,43 @@ describe("index lock", () => {
     const { dir, config } = project({ "a.md": "a", ".marian-knows/marian-knows/index.lock": "999999999" });
     expect(await syncIndex(config)).toMatchObject({ files: 1 });
     expect(existsSync(lockFile(dir))).toBe(false);
+  });
+
+  it("stores hostname:pid while held", () => {
+    const { dir, config } = project({ "a.md": "a" });
+    const release = acquireIndexLock(config);
+    try {
+      expect(readFileSync(lockFile(dir), "utf8")).toBe(`${hostname()}:${process.pid}`);
+    } finally {
+      release();
+    }
+  });
+
+  it("refuses a lock held by another live process on this host, also in the old pid-only format", async () => {
+    for (const owner of [`${hostname()}:${process.ppid}`, String(process.ppid)]) {
+      const { config } = project({ "a.md": "a", ".marian-knows/marian-knows/index.lock": owner });
+      await expect(syncIndex(config)).rejects.toThrow(`index is already running (pid ${process.ppid})`);
+    }
+  });
+
+  it("takes over a lock from another host: its pid says nothing here (a killed container)", async () => {
+    const { dir, config } = project({ "a.md": "a", ".marian-knows/marian-knows/index.lock": `other-host:${process.ppid}` });
+    expect(await syncIndex(config)).toMatchObject({ files: 1 });
+    expect(existsSync(lockFile(dir))).toBe(false);
+  });
+
+  it("takes over a lock with this process's pid that this process does not hold (a restarted container)", async () => {
+    const owner = `${hostname()}:${process.pid}`;
+    const { dir, config } = project({ "a.md": "a", ".marian-knows/marian-knows/index.lock": owner });
+    expect(await syncIndex(config)).toMatchObject({ files: 1 });
+    expect(existsSync(lockFile(dir))).toBe(false);
+  });
+
+  it("destroy leaves no lock behind for the next run in the same process", async () => {
+    const { config } = project({ "a.md": "a" });
+    await syncIndex(config);
+    expect(destroyIndex(config)).toBe(true);
+    expect(await syncIndex(config)).toMatchObject({ files: 1 });
   });
 
   it("releases the lock after a run", async () => {

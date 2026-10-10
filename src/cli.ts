@@ -18,8 +18,7 @@ import {
   scanSource,
   search as searchIndex,
   status as projectStatus,
-  syncGitSource,
-  syncIndex,
+  refreshIndex,
   type DocFilterOptions,
   type LoadedConfig,
   type LogEntry,
@@ -155,25 +154,16 @@ async function scan(values: { config?: string; json?: boolean; disk?: boolean })
 }
 
 async function index(values: { config?: string; full?: boolean }): Promise<number> {
-  let config = requireConfig(values.config);
+  const config = requireConfig(values.config);
   if (!config) return 2;
-  if (config.git) {
-    const g = await syncGitSource(config.git, (line) => console.error(line));
-    warn(g.warnings);
-    // Loaded before a first clone, the config still says the source directory does not exist.
-    config = loadConfig(config.configPath);
-    if (!config.sourceExists) {
-      // Indexing a missing directory would empty the index; a stale base beats no base.
-      warn([`not indexing: ${config.sourceDir} does not exist; the previous index stays`]);
-      return 0;
-    }
-  }
-  const started = performance.now();
-  const r = await syncIndex(config, { full: values.full });
-  const seconds = ((performance.now() - started) / 1000).toFixed(1);
-  console.log(`Files: ${r.files}`);
-  console.log(`+ ${r.added} added, ~ ${r.changed} changed, - ${r.removed} removed (${seconds} s)`);
+  const r = await refreshIndex(config, { full: values.full, log: (line) => console.error(line) });
   warn(r.warnings);
+  if (!r.index) return 0;
+  console.log(`Files: ${r.index.files}`);
+  console.log(
+    `+ ${r.index.added} added, ~ ${r.index.changed} changed, - ${r.index.removed} removed (${(r.ms / 1000).toFixed(1)} s)`,
+  );
+  warn(r.index.warnings);
   return 0;
 }
 

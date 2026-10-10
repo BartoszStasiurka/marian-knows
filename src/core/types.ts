@@ -11,6 +11,8 @@ export interface LoadedConfig {
   exclude: string[];
   /** Where the source directory is cloned from; null for a plain local directory. */
   git: GitSource | null;
+  /** Minutes between index refreshes while `serve` runs; 0 = only at start. */
+  sync: number;
 }
 
 /** The `git` block of the config, resolved. */

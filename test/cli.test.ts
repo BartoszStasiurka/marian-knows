@@ -764,7 +764,8 @@ describe.concurrent("index with git", () => {
     const r = await runCli(["index"], { cwd: dir });
     expect(r.code).toBe(2);
     expect(r.stderr).toMatch(/^git: cloning .*\nerror: cannot clone /);
-    expect(existsSync(path.join(dir, ".marian-knows"))).toBe(false);
+    expect(existsSync(path.join(dir, ".marian-knows", "marian-knows", "index.db"))).toBe(false);
+    expect(existsSync(path.join(dir, ".marian-knows", "marian-knows", "index.lock"))).toBe(false);
   });
 
   it("keeps the previous index when git.path is missing", async () => {

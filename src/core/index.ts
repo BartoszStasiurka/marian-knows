@@ -1,7 +1,9 @@
 export {
   CONFIG_ENV,
   CONFIG_FILENAME,
+  DEFAULT_SYNC_MINUTES,
   MAX_DESCRIPTION_LENGTH,
+  MAX_SYNC_MINUTES,
   MAX_NAME_LENGTH,
   findConfig,
   loadConfig,
@@ -60,6 +62,7 @@ export {
 } from "./parse.js";
 export { MAX_FILE_BYTES, scanSource } from "./scan.js";
 export { redactUrl, syncGitSource } from "./git.js";
+export { refreshIndex, startIndexRefresh } from "./refresh.js";
 export {
   DEFAULT_LIMIT,
   FALLBACK_THRESHOLD,
@@ -89,6 +92,7 @@ export {
 export type { DocFilterOptions } from "./filter.js";
 export type { GitSyncResult } from "./git.js";
 export type { IndexOptions } from "./indexer.js";
+export type { IndexRefresher, RefreshOptions, RefreshResult, RefreshScheduleOptions } from "./refresh.js";
 export type { DocRef, GetOptions, GetResult } from "./get.js";
 export type { ListItem, ListResult } from "./list.js";
 export type {

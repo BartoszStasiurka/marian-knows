@@ -194,18 +194,21 @@ Pure functions, no DB.
 
 ## 13. Index freshness
 
-- [ ] `syncIndex` on server start and every N minutes (WAL keeps reads working)
+- [x] `syncIndex` on server start and every N minutes (WAL keeps reads working)
+  - `refreshIndex` in core = git step + sync under one lock, shared by `index` and `serve`; `sync: <minutes>` in
+    the config (default 15, `0` = only at start); failures and a lock held by a manual `index` are warnings
 - [ ] Optional webhook endpoint with a secret to force a sync after `git push`
 
 ## 14. Deploy
 
 The container is disposable; all state lives on volumes, so a rebuild replaces code only.
 
-- [ ] Index lock survives container restarts: store `hostname:pid` instead of the pid
+- [x] Index lock survives container restarts: store `hostname:pid` instead of the pid
   - In a container the server always gets the same pid (1, or 7 under `tini`). A lock left by a killed
     container holds that pid, the new server sees it "alive" and `syncIndex` fails forever. A lock from another
     hostname is stale.
-- [ ] Graceful shutdown on SIGTERM: stop accepting requests, finish running ones, close the DB, release the lock
+- [x] Graceful shutdown on SIGTERM: stop accepting requests, finish running ones, close the DB, release the lock
+  - Waits at most 8 s (Docker kills after 10 s) for tool calls and a running refresh; the DB is opened per call
 - [ ] Dockerfile: multi-stage on `node:20-bookworm-slim`, native `better-sqlite3` built in the image, runs as
   `node` (UID 1000); `buildx --platform linux/amd64` when building on Apple Silicon
 - [ ] Volume layout
@@ -221,15 +224,15 @@ The container is disposable; all state lives on volumes, so a rebuild replaces c
   restart, not a rebuild (server instructions are built at start); `token add` via `docker compose exec`
 - [ ] Connection guide: Claude Code, Claude Desktop / claude.ai, custom Agent SDK agents
 
-## 15. Git source
+## 15. Git source (done)
 
 Spec: `docs/superpowers/specs/2026-10-08-git-source-design.md`. Comes before 13: stage 13 calls the same git step from
 `serve`.
 
-- [ ] `git` block in the config (`url`, `branch`, `path`, `deployKey`); top-level `path` is the working copy
-- [ ] `index` clones (shallow, partial, sparse for `git.path`) or fast-forwards; never discards local changes
-- [ ] Deploy key: generated when missing, used through `GIT_SSH_COMMAND`, host keys in `<deployKey>.known_hosts`
-- [ ] Docker entrypoint without git logic; `compose.yml` copied without edits
+- [x] `git` block in the config (`url`, `branch`, `path`, `deployKey`); top-level `path` is the working copy
+- [x] `index` clones (shallow, partial, sparse for `git.path`) or fast-forwards; never discards local changes
+- [x] Deploy key: generated when missing, used through `GIT_SSH_COMMAND`, host keys in `<deployKey>.known_hosts`
+- [x] Docker entrypoint without git logic; `compose.yml` copied without edits
 
 ## Later (not planned)
 

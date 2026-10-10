@@ -31,6 +31,7 @@ exclude:
 | `path`    | katalog źródłowy; względny do katalogu z `marian-knows.yml` albo absolutny; opcjonalny     |
 | `exclude` | string lub lista globów względnych do `path`; opcjonalne                                  |
 | `git`     | repo gita, z którego `index` klonuje i aktualizuje `path`; opcjonalne                      |
+| `sync`    | co ile minut `serve` odświeża indeks; opcjonalne, domyślnie 15                              |
 
 **`name`**
 - Po usunięciu białych znaków z brzegów: od 1 do 128 znaków, bez znaków sterujących.
@@ -63,8 +64,12 @@ git:
 - `deployKey`: względny do katalogu z `marian-knows.yml` albo absolutny.
 - Z `git` pole `path` jest **wymagane**: klon w katalogu konfiguracji wymieszałby repo z konfiguracją, tokenami i `.marian-knows/`. `path` dalej jest stringiem i oznacza kopię roboczą; nieistniejący katalog to normalny stan przed pierwszym klonem.
 - Katalog indeksowany to `path` + `git.path`; ścieżki wirtualne liczą się od niego (`git.path: docs` i plik `docs/api/x.md` dają `/api/x.md`).
-- Kopia robocza to zwykłe repo, można w nim pracować bez MarianKnows. Wczytanie konfiguracji nie uruchamia gita; robi to tylko `index` (sekcja 4).
+- Kopia robocza to zwykłe repo, można w nim pracować bez MarianKnows. Wczytanie konfiguracji nie uruchamia gita; robią to tylko `index` i `serve` (sekcja 4).
 - Usunięcie bloku `git` zostawia działającą konfigurację na lokalnym katalogu.
+
+**`sync`**
+- Liczba całkowita minut od 0 do 1440, domyślnie 15. Odstęp liczony od końca jednego odświeżenia do początku następnego.
+- `0`: serwer odświeża indeks tylko przy starcie. CLI (`index`) nie korzysta z tego pola.
 
 **Walidacja:** nieznane pola są błędem; stare pole `sources` jest odrzucane z osobnym komunikatem. Walidacja zbiera wszystkie błędy naraz, kod wyjścia 2.
 
@@ -121,7 +126,7 @@ CREATE VIRTUAL TABLE sections_fts USING fts5(         -- rowid = sections.id
 
 **Pełna przebudowa:** przy niezgodności `schema_version` (schemat, tokenizer, parser sekcji) albo ręcznie `marian-knows index --full`.
 
-**Źródło z gita.** Gdy konfiguracja ma blok `git`, `index` przed skanem aktualizuje kopię roboczą. Robi to wyłącznie `index`; `scan`, `search`, `status` i `serve` nigdy nie uruchamiają gita. Git jest wywoływany jako program `git` (brak programu: błąd `git not found; install git or remove the git block`), zawsze z `GIT_TERMINAL_PROMPT=0`, więc nigdy nie czeka na hasło. Dane logowania w adresach `http(s)://` są w wyjściu zastępowane `***@`.
+**Źródło z gita.** Gdy konfiguracja ma blok `git`, `index` przed skanem aktualizuje kopię roboczą. Robią to `index` i odświeżanie indeksu w `serve` (sekcja 9); `scan`, `search` i `status` nigdy nie uruchamiają gita. Git jest wywoływany jako program `git` (brak programu: błąd `git not found; install git or remove the git block`), zawsze z `GIT_TERMINAL_PROMPT=0`, więc nigdy nie czeka na hasło. Dane logowania w adresach `http(s)://` są w wyjściu zastępowane `***@`.
 
 - **Brak `path` albo pusty katalog:** `git clone --depth 1 --filter=blob:none --single-branch --branch <branch>`, z `--sparse` i `sparse-checkout set --cone <git.path>`, gdy ustawiono `git.path`. Klon powstaje obok, w `<path>.clone-<pid>`, i jest przemianowywany na `path` dopiero po zakończeniu; pozostałości po przerwanych klonach (`<path>.clone-*`) są usuwane. Nieudany klon to błąd (kod 2), nic nie jest indeksowane i nic nie zostaje na dysku.
 - **`path` istnieje:** musi być korzeniem repo (`rev-parse --show-toplevel`, porównane po `realpath`) z `remote.origin.url` równym `git.url` (bez końcowego `/` i `.git`). Inaczej błąd (kod 2): `path exists and is not a git repository: <path>` albo `<path> is a clone of <origin>, config says <url>; remove the directory to re-clone`. MarianKnows nie pisze do katalogu, którego sam nie sklonował.
@@ -146,7 +151,9 @@ CREATE VIRTUAL TABLE sections_fts USING fts5(         -- rowid = sections.id
 - `Permission denied (publickey)`: komunikat powtarza klucz publiczny z `<deployKey>.pub`. Zmieniony klucz hosta: jedna linia `the git host key has changed; if expected, delete <deployKey>.known_hosts` zamiast banera ssh.
 
 **Odporność i współbieżność:** WAL (`search` działa w trakcie `index`), blokada przed równoległymi `index`, nieczytelny plik to ostrzeżenie i kontynuacja. `status` pokazuje wiek indeksu.
-- Blokada to plik `index.lock` w katalogu bazy (`.marian-knows/<nazwa>/`) z PID właściciela, zakładany atomowo i usuwany po zakończeniu. Gdy trzyma go żywy proces, `index` kończy się błędem `index is already running (pid N)` (kod 2); blokada po martwym procesie jest przejmowana.
+- Blokada to plik `index.lock` w katalogu bazy (`.marian-knows/<nazwa>/`) z `hostname:pid` właściciela, zakładany atomowo i usuwany po zakończeniu. Obejmuje krok git i synchronizację, więc dwa przebiegi nigdy nie pobierają naraz do tej samej kopii roboczej. Gdy trzyma go żywy proces, `index` kończy się błędem `index is already running (pid N)` (kod 2).
+- Blokada jest porzucona i przejmowana, gdy: proces o tym PID nie żyje; pochodzi z innego hosta (PID nic tu nie znaczy, a odtworzony kontener dostaje nowy hostname); ma PID bieżącego procesu, który jej nie trzyma (zrestartowany kontener zachowuje hostname i uruchamia serwer zawsze z tym samym PID). Stary format z samym PID jest traktowany jak blokada z tego hosta.
+- Skutek: `docker compose run` (nowy kontener, inny hostname) przejąłby blokadę działającego serwera. Ręczny `index` w kontenerze idzie przez `docker compose exec`.
 - Plik, którego nie da się odczytać, jest traktowany jak nieobecny: jego poprzednia wersja znika z indeksu. Plik bez zmian `mtime` i `size` nie jest czytany, więc zostaje.
 - Błąd w trakcie synchronizacji wycofuje całą transakcję; indeks zostaje w poprzednim stanie.
 
@@ -195,7 +202,7 @@ Opcja globalna: `--config <plik>` (dla `init`: plik, który ma zostać utworzony
 | `scan`   | `--json`, `--disk` (dołącza ścieżki dyskowe, wyłącznie diagnostycznie)                                         |
 | `get`    | `--max-chars <n>` (limit znaków odpowiedzi, `0` = bez limitu; sekcja 9)                                        |
 | `log`    | `--zero`, `--days <n>`, `--json` (sekcja 9)                                                                    |
-| `serve`  | `--http`, `--port <n>` (domyślnie 3000, `0` = dowolny wolny), `--host <adres>` (domyślnie `127.0.0.1`) (sekcja 9) |
+| `serve`  | `--http`, `--port <n>` (domyślnie 3000, `0` = dowolny wolny), `--host <adres>` (domyślnie `127.0.0.1`); odświeża indeks przy starcie i co `sync` minut (sekcja 9) |
 | `token`  | `list --json` (sekcja 9)                                                                                       |
 
 **`init <project_name>`:** nazwa podlega tym samym zasadom co `name`. Domyślny cel to `./marian-knows.yml`; istniejący plik nigdy nie jest nadpisywany (kod 2). Polecenie nie modyfikuje `.gitignore` i nie tworzy plików bazy danych.
@@ -293,7 +300,7 @@ Cel: baza wiedzy dla agentów AI, wystawiona jako serwer MCP w sieci. Jeden serw
 - Opis `search` też zaczyna się od `name` i `description`, bo nie każdy klient przekazuje modelowi `instructions`.
 - Opisy narzędzi są pisane dla modelu: zapytanie to 2–4 słowa kluczowe, nie pełne zdanie; przy braku wyników ponów z synonimami; czytaj sekcje po kotwicy zamiast całych plików.
 - Transport: stdio (domyślnie, lokalnie) i Streamable HTTP (`serve --http --port <n>`).
-- HTTP: jeden endpoint `/mcp`, inne ścieżki to 404 (bez sprawdzania tokenu). Domyślnie `127.0.0.1:3000`; `--host 0.0.0.0` dla kontenera. Odpowiedzi JSON zamiast strumienia SSE. Każde żądanie `initialize` bez `Mcp-Session-Id` otwiera nową sesję; sesja należy do tokenu, który ją otworzył (inny token dostaje 404, jak dla nieznanej sesji). Sesja kończy się na `DELETE` albo po 30 minutach bez żądań (klient zaczyna wtedy nową). SIGINT / SIGTERM zamyka wszystkie sesje (z `disconnect`) i zapisuje daty użycia tokenów. Adres endpointu idzie na stderr.
+- HTTP: jeden endpoint `/mcp`, inne ścieżki to 404 (bez sprawdzania tokenu). Domyślnie `127.0.0.1:3000`; `--host 0.0.0.0` dla kontenera. Odpowiedzi JSON zamiast strumienia SSE. Każde żądanie `initialize` bez `Mcp-Session-Id` otwiera nową sesję; sesja należy do tokenu, który ją otworzył (inny token dostaje 404, jak dla nieznanej sesji). Sesja kończy się na `DELETE` albo po 30 minutach bez żądań (klient zaczyna wtedy nową). SIGINT / SIGTERM: serwer przestaje przyjmować połączenia (żądanie na już otwartym połączeniu dostaje 503), czeka na trwające wywołania narzędzi (POST; otwarty strumień powiadomień GET się nie liczy) i trwające odświeżenie indeksu, najwyżej 8 s (poniżej 10 s, które Docker daje przed SIGKILL), potem zamyka wszystkie sesje (z `disconnect`), zapisuje daty użycia tokenów i kończy się kodem 0. Drugi sygnał zabija proces od razu. Adres endpointu idzie na stderr.
 
 **Log zapytań** (wspólny dla CLI i MCP)
 - Pliki `.marian-knows/<nazwa>/logs/queries-YYYY-MM-DD.jsonl`, jeden obiekt JSON na linię.
@@ -317,7 +324,9 @@ Cel: baza wiedzy dla agentów AI, wystawiona jako serwer MCP w sieci. Jeden serw
 - Stdio nie wymaga tokenu (proces lokalny).
 
 **Świeżość indeksu**
-- Serwer wykonuje `syncIndex` przy starcie i co N minut; WAL pozwala czytać w trakcie.
+- `serve` (stdio i HTTP) robi to samo co `index` (krok git, potem synchronizacja) w tle: zaraz po starcie i potem co `sync` minut od końca poprzedniego przebiegu, więc przebiegi się nie nakładają. `sync: 0` zostawia tylko przebieg przy starcie. WAL pozwala czytać w trakcie; do końca przebiegu narzędzia odpowiadają z poprzedniego indeksu (przy pierwszym starcie bez indeksu: błąd braku indeksu).
+- Wyjście na stderr: przebieg przy starcie zawsze (linie `git: …`, ostrzeżenia, `index: <pliki> files, + <n> added, ~ <n> changed, - <n> removed (<s> s)`); kolejne tylko wtedy, gdy coś się zmieniło (nowy commit, zmienione pliki) albo jest ostrzeżenie.
+- Błędy nie zatrzymują serwera: blokada zajęta przez ręczny `index` daje `! warning: index refresh skipped: …`, błąd gita (także wygenerowanie deploy key) `! warning: index refresh failed: …`; następny przebieg próbuje znowu.
 - Opcjonalnie endpoint webhook z sekretem wymuszający synchronizację (np. po `git push`).
 
 **Wdrożenie:** obraz Docker (natywny `better-sqlite3` budowany w obrazie), kontener jednorazowy, cały stan na wolumenach: `/data` (config, plik tokenów, `.marian-knows/`) i `/knowledge` (repozytorium wiedzy, tylko do odczytu). HTTPS przez reverse proxy. Lock indeksu przechowuje `hostname:pid`, bo PID procesu w kontenerze powtarza się między restartami. SIGTERM kończy trwające żądania i zamyka bazę.

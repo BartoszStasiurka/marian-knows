@@ -10,6 +10,10 @@ export const CONFIG_FILENAME = "marian-knows.yml";
 export const CONFIG_ENV = "MARIAN_KNOWS_CONFIG";
 export const MAX_NAME_LENGTH = 128;
 export const MAX_DESCRIPTION_LENGTH = 2000;
+/** Minutes between index refreshes in `serve` when the config does not say. */
+export const DEFAULT_SYNC_MINUTES = 15;
+/** One day; a longer gap is a typo, not a schedule. */
+export const MAX_SYNC_MINUTES = 1440;
 
 const GitSchema = z
   .object({
@@ -32,6 +36,7 @@ const ConfigSchema = z
     path: z.string().min(1).optional(),
     exclude: z.union([z.string(), z.array(z.string())]).optional(),
     git: GitSchema.optional(),
+    sync: z.number().int().min(0).max(MAX_SYNC_MINUTES).optional(),
   })
   .strict();
 
@@ -154,5 +159,6 @@ export function loadConfig(configPath: string): LoadedConfig {
     sourceExists,
     exclude: exclude === undefined ? [] : typeof exclude === "string" ? [exclude] : exclude,
     git,
+    sync: parsed.data.sync ?? DEFAULT_SYNC_MINUTES,
   };
 }

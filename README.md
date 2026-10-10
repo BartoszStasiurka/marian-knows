@@ -52,6 +52,7 @@ description: >                  # optional, up to 2000 chars; shown to MCP agent
 path: ./docs                    # optional, relative to this file; defaults to its directory
 exclude:                        # optional, a glob or a list of globs relative to path
   - "**/draft/**"
+sync: 15                        # optional: minutes between index refreshes in serve (0 = only at start)
 ```
 
 - Scanning is recursive and picks up `.md` files only.
@@ -74,7 +75,7 @@ git:
 
 The clone is shallow and a normal working copy: you can work in it. `index` never discards local changes; it
 warns and indexes what is on disk when the copy has changes, is on another branch or cannot fast-forward. Virtual
-paths start at `git.path`. Only `index` runs git.
+paths start at `git.path`. Only `index` and the index refresh in `serve` run git.
 
 Config lookup: `--config <file>`, then `MARIAN_KNOWS_CONFIG`, then `marian-knows.yml` searched upwards from the
 current directory. The index lives in `.marian-knows/<config file name without extension>/` next to the config
@@ -154,8 +155,12 @@ marian-knows log --zero --days 30 # queries with no results: gaps in the knowled
 ## MCP server
 
 `marian-knows serve` exposes the knowledge base to AI agents over MCP (stdio). It is read-only and uses the
-config found the usual way (`--config`, `MARIAN_KNOWS_CONFIG`, search upward). Run `index` first; the server
-does not sync the index yet.
+config found the usual way (`--config`, `MARIAN_KNOWS_CONFIG`, search upward).
+
+The server keeps the index fresh by itself: it runs what `index` does (git step included) in the background at
+start and then every `sync` minutes (default 15), printing on stderr only runs that changed something or warn.
+Tools answer from the previous index meanwhile. A failed refresh is a warning and the server keeps serving. On
+SIGINT / SIGTERM it stops taking connections and waits up to 8 s for running tool calls and a running refresh.
 
 ```bash
 claude mcp add kb -- marian-knows serve --config /path/to/marian-knows.yml

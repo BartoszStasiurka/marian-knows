@@ -15,13 +15,21 @@ import {
   logQuery,
   logSession,
   search as searchIndex,
+  startIndexRefresh,
   status as projectStatus,
+  type IndexRefresher,
   type AccessDenial,
   type DocFilterOptions,
   type LoadedConfig,
   type QueryRecord,
   type SessionRecord,
 } from "./core/index.js";
+
+/**
+ * How long shutdown waits for running requests and an index refresh before giving up. Below Docker's 10 s between
+ * SIGTERM and SIGKILL, so the server still gets to close sessions and write token use.
+ */
+export const SHUTDOWN_GRACE_MS = 8000;
 
 /** Most files one `search` call may return; keeps a careless limit from flooding the agent's context. */
 export const MCP_MAX_LIMIT = 50;
@@ -231,16 +239,28 @@ of files and sections, index time and age in seconds. Use it when results look s
   return server;
 }
 
+/** Refreshes the index now and every `sync` minutes of the config, reporting on stderr. */
+function refreshInBackground(config: LoadedConfig): IndexRefresher {
+  return startIndexRefresh(config, {
+    everyMs: config.sync * 60_000,
+    log: (line) => console.error(line),
+    warn: (w) => console.error(`! warning: ${w}`),
+  });
+}
+
 /**
  * Serves the knowledge base over stdio until the client disconnects. Diagnostics go to stderr only.
  * The session ends when stdin closes or on SIGINT / SIGTERM; both close the server, which logs `disconnect`.
+ * The index is refreshed in the background meanwhile; tools answer from the previous index until a refresh ends.
  */
 export async function serveStdio(config: LoadedConfig): Promise<void> {
   const server = createMcpServer(config, { who: "local" });
   await server.connect(new StdioServerTransport());
-  process.stdin.once("end", () => void server.close());
+  const refresher = refreshInBackground(config);
+  const shutdown = () => Promise.all([server.close(), refresher.stop(SHUTDOWN_GRACE_MS)]);
+  process.stdin.once("end", () => void shutdown());
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
-    process.once(signal, () => void server.close().finally(() => process.exit(0)));
+    process.once(signal, () => void shutdown().finally(() => process.exit(0)));
   }
 }
 
@@ -266,8 +286,11 @@ export interface HttpServerHandle {
   sessions(): number;
   /** Number of tokens the server accepts right now. */
   tokens(): number;
-  /** Closes every session (logging `disconnect`), writes pending token use, stops listening. */
-  close(): Promise<void>;
+  /**
+   * Stops accepting connections, lets running requests finish (at most `graceMs`, default `SHUTDOWN_GRACE_MS`),
+   * then closes every session (logging `disconnect`), writes pending token use and drops the connections left.
+   */
+  close(graceMs?: number): Promise<void>;
 }
 
 interface Session {
@@ -392,7 +415,22 @@ export async function startHttpServer(config: LoadedConfig, options: HttpOptions
     await transport.handleRequest(req, res, body);
   };
 
+  // Tool calls (POST) being handled, so shutdown can wait for them; none is accepted once closing. A GET is the
+  // client's open notification stream, which never ends by itself.
+  let inflight = 0;
+  let closing = false;
+  const idle: (() => void)[] = [];
   const http = createServer((req, res) => {
+    if (closing) {
+      sendJson(res, 503, { error: "shutting down" }, { Connection: "close" });
+      return;
+    }
+    if (req.method === "POST") {
+      inflight++;
+      res.once("close", () => {
+        if (--inflight === 0) for (const resolve of idle.splice(0)) resolve();
+      });
+    }
     handle(req, res).catch((e: unknown) => {
       console.error(`! error: ${e instanceof Error ? e.message : String(e)}`);
       if (!res.headersSent) rpcError(res, 500, -32603, "Internal server error");
@@ -423,19 +461,31 @@ export async function startHttpServer(config: LoadedConfig, options: HttpOptions
     url: `http://${host}:${port}${MCP_HTTP_PATH}`,
     sessions: () => sessions.size,
     tokens: () => verifier.size,
-    async close() {
+    async close(graceMs = SHUTDOWN_GRACE_MS) {
+      closing = true;
       clearInterval(sweep);
+      const stopped = new Promise<void>((resolve) => http.close(() => resolve()));
+      http.closeIdleConnections();
+      if (inflight > 0) {
+        let timer: NodeJS.Timeout | undefined;
+        await Promise.race([
+          new Promise<void>((resolve) => idle.push(resolve)),
+          new Promise<void>((resolve) => (timer = setTimeout(resolve, graceMs))),
+        ]);
+        clearTimeout(timer);
+      }
       await Promise.all([...sessions.values()].map((s) => s.server.close()));
       verifier.flush();
-      await new Promise<void>((resolve) => {
-        http.close(() => resolve());
-        http.closeAllConnections();
-      });
+      http.closeAllConnections();
+      await stopped;
     },
   };
 }
 
-/** Runs the HTTP server until SIGINT / SIGTERM, which close every session before exiting. Diagnostics go to stderr. */
+/**
+ * Runs the HTTP server until SIGINT / SIGTERM, which let running requests finish and close every session before
+ * exiting. The index is refreshed in the background. Diagnostics go to stderr.
+ */
 export async function serveHttp(config: LoadedConfig, options: HttpOptions): Promise<void> {
   const handle = await startHttpServer(config, options);
   console.error(`MCP over HTTP: ${handle.url}`);
@@ -445,7 +495,10 @@ export async function serveHttp(config: LoadedConfig, options: HttpOptions): Pro
         "Add one: marian-knows token add <name>",
     );
   }
+  const refresher = refreshInBackground(config);
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
-    process.once(signal, () => void handle.close().finally(() => process.exit(0)));
+    process.once(signal, () => {
+      void Promise.all([handle.close(), refresher.stop(SHUTDOWN_GRACE_MS)]).finally(() => process.exit(0));
+    });
   }
 }

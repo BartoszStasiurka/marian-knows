@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { request } from "node:http";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -181,6 +182,51 @@ describe("MCP over HTTP", () => {
     expect(sessions(config).map((e) => e.op)).toEqual(["connect", "disconnect"]);
   });
 
+  it("close lets a request in flight finish and refuses new connections", async () => {
+    const { url, anna, handle } = await start();
+    const body = JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "slow", version: "1" } },
+    });
+    // The body arrives in two parts with close() in between: the request is in flight when shutdown starts.
+    const response = new Promise<number>((resolve, reject) => {
+      const req = request(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${anna}`,
+          "Content-Type": "application/json",
+          Accept: "application/json, text/event-stream",
+          "Content-Length": Buffer.byteLength(body),
+        },
+      });
+      req.on("response", (res) => {
+        res.resume();
+        resolve(res.statusCode ?? 0);
+      });
+      req.on("error", reject);
+      req.write(body.slice(0, 10));
+      setTimeout(() => req.end(body.slice(10)), 100);
+    });
+    await new Promise((r) => setTimeout(r, 30));
+    const closed = handle.close();
+    expect(await response).toBe(200);
+    await closed;
+    await expect(fetch(url, { method: "POST" })).rejects.toThrow();
+  });
+
+  it("close gives up on a request that does not finish within the grace period", async () => {
+    const { url, anna, handle } = await start();
+    const req = request(url, { method: "POST", headers: { Authorization: `Bearer ${anna}`, "Content-Length": 100 } });
+    req.on("error", () => {});
+    req.write("{");
+    await new Promise((r) => setTimeout(r, 30));
+    const started = Date.now();
+    await handle.close(100);
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
   it("close ends open sessions and writes the token's last use", async () => {
     const { url, anna, config, file, handle } = await start();
     await connect(url, anna);
@@ -213,6 +259,7 @@ describe("marian-knows serve --http", () => {
       expect(url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
       const { client } = await connect(url, anna);
       expect((await search(client, "urlopu")).isError).toBeFalsy();
+      await until(() => stderr.includes("index: 1 files"), 10_000);
     } finally {
       child.kill("SIGTERM");
     }

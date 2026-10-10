@@ -33,6 +33,7 @@ describe("loadConfig", () => {
       sourceExists: true,
       exclude: [],
       git: null,
+      sync: 15,
     });
   });
 
@@ -143,6 +144,23 @@ describe("loadConfig", () => {
   it("reports an empty config file", () => {
     const dir = makeTree();
     expect(errorsOf(() => loadConfig(write(dir, ""))).length).toBeGreaterThan(0);
+  });
+});
+
+describe("loadConfig sync", () => {
+  it("reads minutes between server refreshes; 0 turns the periodic refresh off", () => {
+    const dir = makeTree();
+    expect(loadConfig(write(dir, "name: T\nsync: 5\n")).sync).toBe(5);
+    expect(loadConfig(write(dir, "name: T\nsync: 0\n")).sync).toBe(0);
+  });
+
+  it("rejects a negative, fractional, too large or non-numeric sync", () => {
+    const dir = makeTree();
+    for (const value of ["-1", "1.5", "1441", "often"]) {
+      const errors = errorsOf(() => loadConfig(write(dir, `name: T\nsync: ${value}\n`)));
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toMatch(/^sync: /);
+    }
   });
 });
 

@@ -11,6 +11,7 @@ import {
   unlinkSync,
   writeSync,
 } from "node:fs";
+import { hostname } from "node:os";
 import path from "node:path";
 import { IndexLockedError, IndexMissingError } from "./errors.js";
 import { fold } from "./fold.js";
@@ -99,6 +100,7 @@ export function destroyIndex(config: LoadedConfig): boolean {
   // Taken, never released: the lock file goes away with the directory.
   acquireIndexLock(config);
   rmSync(dir, { recursive: true, force: true });
+  heldLocks.delete(path.join(dir, LOCK_FILENAME));
   try {
     rmdirSync(path.dirname(dir));
   } catch {
@@ -137,29 +139,52 @@ function isAlive(pid: number): boolean {
   }
 }
 
+/** Lock files this process holds right now; the pid alone cannot tell them from a lock a dead process left. */
+const heldLocks = new Set<string>();
+
 /**
- * Takes `index.lock` in the index directory (holds the owner's pid). A lock left by a dead process is taken over.
+ * Whether the lock owner (`hostname:pid`, or a bare pid from older versions) may still be running. A lock from another
+ * host is stale: its pid means nothing here, and a container gets a new hostname when recreated. A lock with this
+ * process's own pid that this process does not hold was left by an earlier process with the same pid: a container
+ * restarted keeps its hostname and starts the server with the same pid every time.
+ */
+function ownerAlive(owner: string): { alive: boolean; pid: number } {
+  const colon = owner.lastIndexOf(":");
+  const host = colon === -1 ? hostname() : owner.slice(0, colon);
+  const pid = Number.parseInt(owner.slice(colon + 1), 10);
+  if (!Number.isInteger(pid) || pid <= 0 || host !== hostname()) return { alive: false, pid };
+  if (pid === process.pid) return { alive: false, pid };
+  return { alive: isAlive(pid), pid };
+}
+
+/**
+ * Takes `index.lock` in the index directory (holds `hostname:pid` of the owner). A stale lock is taken over.
  * Throws IndexLockedError when a live process holds it. Returns the release function.
  */
 export function acquireIndexLock(config: LoadedConfig): () => void {
   const file = path.join(indexDir(config), LOCK_FILENAME);
   mkdirSync(path.dirname(file), { recursive: true });
+  if (heldLocks.has(file)) throw new IndexLockedError(process.pid);
   for (let attempt = 0; ; attempt++) {
     try {
       const fd = openSync(file, "wx");
-      writeSync(fd, String(process.pid));
+      writeSync(fd, `${hostname()}:${process.pid}`);
       closeSync(fd);
-      return () => unlinkSync(file);
+      heldLocks.add(file);
+      return () => {
+        heldLocks.delete(file);
+        unlinkSync(file);
+      };
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
     }
-    let pid = NaN;
+    let owner = { alive: false, pid: NaN };
     try {
-      pid = Number.parseInt(readFileSync(file, "utf8"), 10);
+      owner = ownerAlive(readFileSync(file, "utf8").trim());
     } catch {
       // Released in the meantime: retry.
     }
-    if (attempt > 0 || (Number.isInteger(pid) && pid > 0 && isAlive(pid))) throw new IndexLockedError(pid);
+    if (attempt > 0 || owner.alive) throw new IndexLockedError(owner.pid);
     try {
       unlinkSync(file);
     } catch {
@@ -197,15 +222,20 @@ export interface IndexOptions {
 export async function syncIndex(config: LoadedConfig, options: IndexOptions = {}): Promise<IndexResult> {
   const release = acquireIndexLock(config);
   try {
-    const { files, warnings } = await scanSource(config);
-    const db = openIndex(config);
-    try {
-      return sync(db, files, [...warnings, ...legacyIndexWarning(config)], options.full ?? false);
-    } finally {
-      db.close();
-    }
+    return await syncIndexLocked(config, options);
   } finally {
     release();
+  }
+}
+
+/** `syncIndex` for a caller that already holds the index lock (`refreshIndex`, which also covers the git step). */
+export async function syncIndexLocked(config: LoadedConfig, options: IndexOptions = {}): Promise<IndexResult> {
+  const { files, warnings } = await scanSource(config);
+  const db = openIndex(config);
+  try {
+    return sync(db, files, [...warnings, ...legacyIndexWarning(config)], options.full ?? false);
+  } finally {
+    db.close();
   }
 }
 
