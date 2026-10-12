@@ -1,9 +1,6 @@
----
-title: Run in Docker
-tags: [guide, docker, http, git]
----
+# Run in Docker (draft)
 
-# Run in Docker
+> Paused work, see [README](README.md). Moved out of `knowledge/guides/`; not served by the knowledge base.
 
 The MCP server over HTTP in one container. The knowledge base is a separate git repository that
 `marian-knows index` clones and updates by itself. The repository address lives in `marian-knows.yml`, so
@@ -38,7 +35,7 @@ recreated at any time.
 
 ## 2. compose.yml
 
-Copy [`docker/compose.example.yml`](https://github.com/BartoszStasiurka/marian-knows/blob/main/docker/compose.example.yml)
+Copy [`compose.example.yml`](compose.example.yml)
 to `/srv/marian-knows/compose.yml`. No edits needed. `TZ` sets the time zone of `docker compose logs`; query
 logs are always in UTC.
 
@@ -65,7 +62,7 @@ git:
 - `description` is what the agent reads to decide whether to use the base at all.
 - Add `exclude` globs (e.g. `"**/draft/**"`) for files you do not want indexed.
 
-More on the git block: [Git source](git-source.md).
+More on the git block: [Git source](../../knowledge/guides/git-source.md).
 
 ## 4. Log in to GHCR (private image only)
 
@@ -130,7 +127,7 @@ running server's index lock.
 ## 7. HTTPS
 
 Port 3000 listens on `127.0.0.1` only, so outside traffic goes through a reverse proxy; see
-[Serve over HTTP](serve-over-http.md#put-https-in-front). In a closed company network without a proxy, change
+[Serve over HTTP](../../knowledge/guides/serve-over-http.md#put-https-in-front). In a closed company network without a proxy, change
 the port mapping in `compose.yml` to `"3000:3000"`.
 
 ## 8. Connect agents
@@ -222,6 +219,16 @@ can be deleted.
 
 ## Container errors
 
-Errors and warnings in `docker compose logs`, with fixes, are in [Troubleshooting](../troubleshooting.md). Rule
-of thumb: a missing knowledge repo on the first start stops the container; once a clone exists, every git
+Rule of thumb: a missing knowledge repo on the first start stops the container; once a clone exists, every git
 problem is a warning and the server keeps serving the last known content.
+
+## Troubleshooting
+
+| Symptom                                           | Cause and fix                                                                 |
+| ------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Container restarts in a loop                      | A new deploy key waits to be added, or the first clone fails. Read `docker compose logs`. |
+| `error: missing config /data/marian-knows.yml`    | Create `data/marian-knows.yml`; see [Docker](#3-knowledge-base-config). |
+| `! warning: KNOWLEDGE_REPO is ignored`            | Old setup. See [Migrate from KNOWLEDGE_REPO](#migrate-from-knowledge_repo). |
+| `no tokens` warning                               | No HTTP tokens yet. `docker compose exec marian-knows marian-knows token add <name>`. |
+
+Other errors: [Troubleshooting](../../knowledge/troubleshooting.md).

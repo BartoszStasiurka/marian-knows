@@ -19,8 +19,8 @@ WORKDIR /app
 COPY --from=build /app/package.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
-COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
-COPY docker/marian-knows.sh /usr/local/bin/marian-knows
+COPY poc/docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY poc/docker/marian-knows.sh /usr/local/bin/marian-knows
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/marian-knows
 
 ENV MARIAN_KNOWS_CONFIG=/data/marian-knows.yml \

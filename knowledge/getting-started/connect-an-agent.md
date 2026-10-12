@@ -29,8 +29,7 @@ marian-knows serve --http --port 3000
 claude mcp add --transport http kb http://127.0.0.1:3000/mcp --header "Authorization: Bearer mk_…"
 ```
 
-Tokens, HTTPS and logs: [Serve over HTTP](../guides/serve-over-http.md). Running it in a container:
-[Docker](../guides/docker.md).
+Tokens, HTTPS and logs: [Serve over HTTP](../guides/serve-over-http.md).
 
 ## Make the agent use it
 

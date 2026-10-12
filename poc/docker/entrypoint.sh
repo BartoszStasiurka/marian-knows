@@ -14,9 +14,9 @@ if [ "$(id -u)" = 0 ]; then
   exec setpriv --reuid=node --regid=node --init-groups "$0" "$@"
 fi
 
-[ -f "$MARIAN_KNOWS_CONFIG" ] || die "missing config $MARIAN_KNOWS_CONFIG (see knowledge/guides/docker.md)"
+[ -f "$MARIAN_KNOWS_CONFIG" ] || die "missing config $MARIAN_KNOWS_CONFIG (see poc/docker/guide.md)"
 if [ -n "${KNOWLEDGE_REPO:-}" ]; then
-  log "! warning: KNOWLEDGE_REPO is ignored; move the repo to git: in marian-knows.yml (see knowledge/guides/docker.md)"
+  log "! warning: KNOWLEDGE_REPO is ignored; move the repo to git: in marian-knows.yml (see poc/docker/guide.md)"
 fi
 
 # Nothing else runs in the container yet, so any index lock is left over from a killed start.

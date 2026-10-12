@@ -11,7 +11,7 @@ const KNOWLEDGE = fileURLToPath(new URL("../knowledge/", import.meta.url));
 
 /** Tag vocabulary from knowledge/README.md: one type and at least one area per file (README files may skip the area). */
 const TYPES = ["getting-started", "guide", "concept", "reference", "troubleshooting"];
-const AREAS = ["cli", "config", "search", "index", "mcp", "http", "git", "docker", "security", "logs"];
+const AREAS = ["cli", "config", "search", "index", "mcp", "http", "git", "security", "logs"];
 
 const MIN_HIT_RATE = 1;
 const MIN_MRR = 0.9;

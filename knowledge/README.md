@@ -15,18 +15,18 @@ or connect your agent to it and ask: see [Connect an agent](getting-started/conn
 
 - New here: [Install](getting-started/install.md), then [Quick start](getting-started/quick-start.md).
 - Giving an AI agent access: [Connect an agent](getting-started/connect-an-agent.md).
-- Running it for a team: [Serve over HTTP](guides/serve-over-http.md) and [Docker](guides/docker.md).
+- Running it for a team: [Serve over HTTP](guides/serve-over-http.md).
 
 ## Layout
 
 | Directory          | What it holds                                                          |
 | ------------------ | ---------------------------------------------------------------------- |
 | `getting-started/` | Install, first index, first agent connection                           |
-| `guides/`          | Task-oriented how-tos: git source, HTTP, Docker, writing a good base   |
+| `guides/`          | Task-oriented how-tos: git source, HTTP, writing a good base           |
 | `concepts/`        | How it works: virtual paths, sections and anchors, search, the index   |
 | `reference/`       | Exact behavior: config fields, every command, MCP tools, JSON, exits   |
 | `troubleshooting.md` | Error and warning messages, what they mean, what to do               |
 
 Every file has a `title` and `tags` in its frontmatter. Tags name the type (`getting-started`, `guide`,
 `concept`, `reference`, `troubleshooting`) and the area (`cli`, `config`, `search`, `index`, `mcp`, `http`,
-`git`, `docker`, `security`, `logs`).
+`git`, `security`, `logs`).

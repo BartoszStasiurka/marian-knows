@@ -2,5 +2,5 @@ name: MarianKnows docs
 description: >
   Documentation of MarianKnows, a Markdown knowledge base with full-text search, a CLI and an MCP server,
   in English. Check here before answering how to install, configure, index, search, serve over MCP or HTTP,
-  use a git source, run it in Docker, or what an error message means.
+  use a git source, or what an error message means.
 path: ./knowledge

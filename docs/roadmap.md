@@ -199,7 +199,10 @@ Pure functions, no DB.
     the config (default 15, `0` = only at start); failures and a lock held by a manual `index` are warnings
 - [ ] Optional webhook endpoint with a secret to force a sync after `git push`
 
-## 14. Deploy
+## 14. Deploy (paused)
+
+Docker work is on hold; the draft (Dockerfile, entrypoint, compose, CI image job, guide) lives in `poc/docker/`.
+The server-side items below that are checked stay in the product.
 
 The container is disposable; all state lives on volumes, so a rebuild replaces code only.
 
@@ -232,7 +235,7 @@ Spec: `docs/superpowers/specs/2026-10-08-git-source-design.md`. Comes before 13:
 - [x] `git` block in the config (`url`, `branch`, `path`, `deployKey`); top-level `path` is the working copy
 - [x] `index` clones (shallow, partial, sparse for `git.path`) or fast-forwards; never discards local changes
 - [x] Deploy key: generated when missing, used through `GIT_SSH_COMMAND`, host keys in `<deployKey>.known_hosts`
-- [x] Docker entrypoint without git logic; `compose.yml` copied without edits
+- [x] Docker entrypoint without git logic; `compose.yml` copied without edits (now in `poc/docker/`, paused)
 
 ## 16. Tag list (done)
 

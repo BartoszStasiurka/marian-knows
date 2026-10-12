@@ -17,13 +17,9 @@
 - query: clone knowledge from a git repository
   expect: /guides/git-source.md
 - query: deploy key
-  expect: [/guides/git-source.md, /guides/docker.md]
+  expect: /guides/git-source.md
 - query: sparse checkout git.path
   expect: [/guides/git-source.md, /reference/config.md]
-- query: docker compose restart update
-  expect: /guides/docker.md
-- query: rollback to a previous image version
-  expect: /guides/docker.md
 - query: queries with no results
   expect: [/guides/finding-gaps.md, /reference/commands/log.md]
 - query: frontmatter title tags

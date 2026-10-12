@@ -333,6 +333,6 @@ Cel: baza wiedzy dla agentów AI, wystawiona jako serwer MCP w sieci. Jeden serw
 - Błędy nie zatrzymują serwera: blokada zajęta przez ręczny `index` daje `! warning: index refresh skipped: …`, błąd gita (także wygenerowanie deploy key) `! warning: index refresh failed: …`; następny przebieg próbuje znowu.
 - Opcjonalnie endpoint webhook z sekretem wymuszający synchronizację (np. po `git push`).
 
-**Wdrożenie:** obraz Docker (natywny `better-sqlite3` budowany w obrazie), kontener jednorazowy, cały stan na wolumenach: `/data` (config, plik tokenów, `.marian-knows/`) i `/knowledge` (repozytorium wiedzy, tylko do odczytu). HTTPS przez reverse proxy. Lock indeksu przechowuje `hostname:pid`, bo PID procesu w kontenerze powtarza się między restartami. SIGTERM kończy trwające żądania i zamyka bazę.
+**Wdrożenie (wstrzymane, szkic w `poc/docker/`):** obraz Docker (natywny `better-sqlite3` budowany w obrazie), kontener jednorazowy, cały stan na wolumenach: `/data` (config, plik tokenów, `.marian-knows/`) i `/knowledge` (repozytorium wiedzy, tylko do odczytu). HTTPS przez reverse proxy. Lock indeksu przechowuje `hostname:pid`, bo PID procesu w kontenerze powtarza się między restartami. SIGTERM kończy trwające żądania i zamyka bazę.
 
 **Poza v2:** podział public/internal, wiele baz na serwer, OAuth, wyszukiwanie semantyczne (tylko jeśli pomiary jakości dla zapytań agentowych pokażą potrzebę), zapis przez MCP.

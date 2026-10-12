@@ -41,7 +41,7 @@ npm run build
 npm link                 # puts `marian-knows` on PATH
 ```
 
-Tarball, native module notes and Docker: [Install](knowledge/getting-started/install.md).
+Tarball and native module notes: [Install](knowledge/getting-started/install.md).
 
 ## Quick start
 

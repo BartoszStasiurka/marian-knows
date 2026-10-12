@@ -11,8 +11,6 @@ tags: [reference, config, logs, http]
 | `MARIAN_KNOWS_NO_LOG` | Any non-empty value other than `0` turns off the query log; the HTTP access log stays |
 | `MARIAN_KNOWS_TOKENS` | Path of the HTTP tokens file instead of `<config name>.tokens.json` next to the config |
 
-The Docker image sets `MARIAN_KNOWS_CONFIG=/data/marian-knows.yml` and `PORT=3000`.
-
 ## Library
 
 The core logic is importable from Node, for scripts and custom integrations:

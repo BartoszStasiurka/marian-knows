@@ -1,6 +1,6 @@
 ---
 title: Troubleshooting
-tags: [troubleshooting, git, docker, http, index, config]
+tags: [troubleshooting, git, http, index, config]
 ---
 
 # Troubleshooting
@@ -12,7 +12,7 @@ Messages as MarianKnows prints them, what they mean, and what to do.
 | Message                                           | Cause and fix                                                                 |
 | ------------------------------------------------- | ----------------------------------------------------------------------------- |
 | `No index. Run: marian-knows index`               | No index for this config yet. Run `marian-knows index`.                       |
-| `index is already running (pid N)`                | Another `index` or a running `serve` refresh holds the lock. Wait; in Docker use `docker compose exec`, never `run`. |
+| `index is already running (pid N)`                | Another `index` or a running `serve` refresh holds the lock. Wait for it to finish. |
 | `! warning: index refresh skipped: …`             | `serve` found the lock busy (a manual `index`). The next run tries again.     |
 | `no indexed files under /x/`                      | The `--path` scope matches nothing. Check the path with `list`.               |
 | Unknown anchor error                              | The anchor is not in the file. The message lists the valid anchors; the file may have changed since the search. |
@@ -32,18 +32,9 @@ Messages as MarianKnows prints them, what they mean, and what to do.
 | `path exists and is not a git repository`         | `path` holds files that are not a clone. MarianKnows writes nothing there: remove the directory or change `path`. |
 | `! warning: fetch failed, indexing the previous content: …` | The git server is unreachable or the key was removed. The previous content stays indexed. |
 | `the git host key has changed; if expected, delete <deployKey>.known_hosts` | The git server has a new host key. Confirm with its admin first; it is the only protection against a spoofed server. |
-| `! warning: local changes in …, not updating`     | Someone edited the working copy. Commit, stash or discard the changes. In a container: delete the clone and restart. |
+| `! warning: local changes in …, not updating`     | Someone edited the working copy. Commit, stash or discard the changes. |
 | `! warning: cannot fast-forward …`                | The history was rewritten (force push). Delete the clone to re-clone.         |
 | `! warning: not indexing: … does not exist; the previous index stays` | `git.path` is wrong or the directory was removed from the repo. |
-
-## Docker
-
-| Symptom                                           | Cause and fix                                                                 |
-| ------------------------------------------------- | ----------------------------------------------------------------------------- |
-| Container restarts in a loop                      | A new deploy key waits to be added, or the first clone fails. Read `docker compose logs`. |
-| `error: missing config /data/marian-knows.yml`    | Create `data/marian-knows.yml`; see [Docker](guides/docker.md#3-knowledge-base-config). |
-| `! warning: KNOWLEDGE_REPO is ignored`            | Old setup. See [Migrate from KNOWLEDGE_REPO](guides/docker.md#migrate-from-knowledge_repo). |
-| `no tokens` warning                               | No HTTP tokens yet. `docker compose exec marian-knows marian-knows token add <name>`. |
 
 ## HTTP
 

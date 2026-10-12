@@ -38,10 +38,6 @@ npm install -g ./marian-knows-0.1.0.tgz
 script compiles it and needs a C++ toolchain (on Debian or Ubuntu: `build-essential` and `python3`). If npm asks
 you to approve install scripts, approve `better-sqlite3`.
 
-## Docker
-
-For a server, use the Docker image instead of a local install: see [Docker](../guides/docker.md).
-
 ## Next step
 
 [Quick start](quick-start.md): index a directory and search it.

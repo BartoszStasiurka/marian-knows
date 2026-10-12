@@ -4,4 +4,4 @@
 !tsconfig.json
 !tsconfig.build.json
 !src/
-!docker/
+!poc/docker/*.sh
