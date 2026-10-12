@@ -234,6 +234,16 @@ Spec: `docs/superpowers/specs/2026-10-08-git-source-design.md`. Comes before 13:
 - [x] Deploy key: generated when missing, used through `GIT_SSH_COMMAND`, host keys in `<deployKey>.known_hosts`
 - [x] Docker entrypoint without git logic; `compose.yml` copied without edits
 
+## 16. Tag list
+
+Agents get a `tag` filter but no way to learn which tags exist.
+
+- [ ] Core `listTags()`: `{tag, count}` over indexed files, grouped case-insensitively like `--tag`, most common
+  spelling wins; sorted by count, then by tag; `--path` / `--exclude-path` scope
+- [ ] `tags` command (`--json`, exit 1 when there are no tags)
+- [ ] `tags` field in `status --json` and the MCP `status` tool; the text `status` shows the number of distinct tags;
+  no separate MCP tool
+
 ## Later (not planned)
 
 Public/internal split, multiple knowledge bases per server, OAuth (JWT issued by an auth server),
