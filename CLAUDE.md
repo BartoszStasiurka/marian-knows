@@ -12,6 +12,9 @@ Node.js 20+, ESM, TypeScript strict. Full spec: `docs/requirements.md` (Polish, 
 - Ask before adding a dependency. Current deps: `yaml`, `zod`, `fast-glob`, `better-sqlite3`, `@modelcontextprotocol/sdk`.
 - Config file name: `marian-knows.yml`. Env: `MARIAN_KNOWS_CONFIG`. DB: `.marian-knows/index.db` next to the config.
 - Tests use temp dirs (`test/helpers.ts`), never real user paths.
+- `knowledge/` is the user documentation and the product's own knowledge base (served by the root `marian-knows.yml`).
+  A user-visible behavior change updates it in the same commit. Small files, one topic each, frontmatter `title`
+  and `tags` (type + area, see `knowledge/README.md`). `docs/` holds the dev spec and roadmap; it will be retired.
 - Do not commit without request.
 
 ## Commands
