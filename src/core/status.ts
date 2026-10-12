@@ -1,6 +1,7 @@
 import { statSync } from "node:fs";
 import { IndexMissingError } from "./errors.js";
 import { indexPath, openIndexReadonly, readMeta } from "./indexer.js";
+import { countTags } from "./tags.js";
 import type { LoadedConfig } from "./types.js";
 
 export interface ProjectStatus {
@@ -21,6 +22,8 @@ export interface ProjectStatus {
   dbSize: number | null;
   indexedAt: string | null;
   ageSeconds: number | null;
+  /** Number of distinct tags, grouped as `listTags` groups them. */
+  tags: number | null;
 }
 
 function fileSize(file: string): number {
@@ -48,6 +51,7 @@ export function status(config: LoadedConfig, now: Date = new Date()): ProjectSta
     dbSize: null,
     indexedAt: null,
     ageSeconds: null,
+    tags: null,
   };
 
   let handle;
@@ -69,6 +73,7 @@ export function status(config: LoadedConfig, now: Date = new Date()): ProjectSta
       dbSize: size,
       indexedAt,
       ageSeconds: Number.isNaN(at) ? null : Math.max(0, Math.floor((now.getTime() - at) / 1000)),
+      tags: countTags(handle).length,
     };
   } finally {
     handle.close();

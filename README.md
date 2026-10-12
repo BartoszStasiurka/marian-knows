@@ -98,6 +98,7 @@ in diagnostics (`scan --disk`, `status`).
 | `index`               | Sync the index incrementally; `--full` rebuilds from scratch                      |
 | `search <query>`      | Files ranked by relevance, one virtual path per line                              |
 | `list`                | Indexed files sorted by path                                                      |
+| `tags`                | Tags, most common first (`--counts`, `--json`, `--path`, `--exclude-path`)        |
 | `get <path>[#anchor]` | Print an indexed file unchanged, or one section of it                             |
 | `status`              | Project, config and index state (`--json`)                                        |
 | `destroy`             | Remove this config's index and query logs; the config and `.md` files stay        |
@@ -129,6 +130,10 @@ marian-knows search "pg_restore" --exact
 
 `list` takes the same `--tag`, `--path` and `--exclude-path` filters.
 
+`tags` prints one tag per line, most common first, equal counts by tag; `--counts` prints `<files>  <tag>`. Tags group case-insensitively,
+as `--tag` matches them; each group shows its most common spelling. `--path` and `--exclude-path` narrow the
+files counted.
+
 ### Get
 
 - `get /a.md` prints the file as it is on disk. `get /a.md#backup` prints the section with that anchor: its
@@ -139,8 +144,9 @@ marian-knows search "pg_restore" --exact
 
 ### Query log
 
-`search`, `get` and `list` append one JSON line per call to `.marian-knows/<config name>/logs/queries-YYYY-MM-DD.jsonl`
-(UTC day): time, source, who, operation, query, filters, result count, top 5 virtual paths, duration. No
+`search`, `get`, `list` and `tags` append one JSON line per call to `.marian-knows/<config name>/logs/queries-YYYY-MM-DD.jsonl`
+(UTC day): time, source, who, operation, query, filters, result count, top 5 virtual paths (tag names for `tags`),
+duration. No
 response content and no disk paths. Files older than 90 days are deleted on write; `destroy` removes the
 logs with the index. A failed write is a warning, never an error. `MARIAN_KNOWS_NO_LOG=1` turns the log off.
 
@@ -175,6 +181,7 @@ in which language, and when to check it. Without one, the agent only learns that
 | `search` | `query`, `limit` (1-50), `tag`, `path[]`, `excludePath[]`, `exact` | JSON array as `search --json`, snippets always filled |
 | `get`    | `path` (`/a.md` or `/a.md#anchor`)                           | Markdown, capped at 20000 characters       |
 | `list`   | `tag`, `path[]`, `excludePath[]`                             | JSON array as `list --json`                |
+| `tags`   | `path[]`, `excludePath[]`, `counts`                          | JSON array as `tags --json` (`counts`: `tags --json --counts`); what the `tag` filter takes |
 | `status` | none                                                         | `status --json` without `config` and `path` (disk paths) |
 
 Virtual paths only. Errors (invalid path, unknown anchor, missing index) come back as tool errors with the
@@ -210,14 +217,16 @@ connected agents (prompt injection), so treat write access to it as an admin rig
 
 ## JSON output
 
-`search`, `list`, `status`, `log`, `scan` and `parse` accept `--json`. With `--json`, stdout carries JSON only;
+`search`, `list`, `tags`, `status`, `log`, `scan` and `parse` accept `--json`. With `--json`, stdout carries JSON only;
 warnings and errors go to stderr.
 
-The `search`, `list` and `status` shapes are a stable contract. Adding fields is backwards compatible;
+The `search`, `list`, `tags` and `status` shapes are a stable contract. Adding fields is backwards compatible;
 removing a field or changing its meaning requires a major version bump.
 
 `search` and `list` print a bare array, one object per file, in rank order (`list`: by path). No results
 print `[]` with exit code 1. Fields are never omitted: a missing value is `null`, missing tags are `[]`.
+`tags --json` prints an array of tag names (`--counts`: of `{tag, count}`) in the text output's order, `[]` with
+exit code 1 when empty.
 
 ```bash
 $ marian-knows search backup --json -n 1 --snippets
@@ -225,6 +234,12 @@ $ marian-knows search backup --json -n 1 --snippets
 
 $ marian-knows list --json
 [{"path":"/server/deploy.md","title":"Deploy","tags":["ops"]}]
+
+$ marian-knows tags --json
+["ops","hr"]
+
+$ marian-knows tags --json --counts
+[{"tag":"ops","count":12},{"tag":"hr","count":3}]
 ```
 
 | Field     | `search` | `list` | Meaning                                                               |
@@ -242,11 +257,11 @@ $ marian-knows list --json
 ```json
 {"name":"My notes","description":null,"config":"/home/me/notes/marian-knows.yml","path":"/home/me/notes","pathExists":true,
  "exclude":[],"index":"ok","files":42,"sections":310,"dbSize":1048576,
- "indexedAt":"2026-01-01T10:00:00.000Z","ageSeconds":120}
+ "indexedAt":"2026-01-01T10:00:00.000Z","ageSeconds":120,"tags":7}
 ```
 
 `index` is `ok`, `missing` or `outdated`. When it is not `ok`, the index fields (`files`, `sections`,
-`indexedAt`, `ageSeconds`) are `null`; `dbSize` is also `null` for `missing`. `description` is `null` when the config has
+`indexedAt`, `ageSeconds`, `tags`) are `null`; `tags` is the number of distinct tags; `dbSize` is also `null` for `missing`. `description` is `null` when the config has
 none.
 
 ## Exit codes
@@ -254,7 +269,7 @@ none.
 | Code | Meaning                                                                                          |
 | ---- | ------------------------------------------------------------------------------------------------ |
 | 0    | OK                                                                                               |
-| 1    | No results from `search`, `list` or `log` (like `grep`)                                          |
+| 1    | No results from `search`, `list`, `tags` or `log` (like `grep`)                                  |
 | 2    | Error: missing or invalid config, invalid virtual path, unknown anchor, missing index, bad arguments, `index` already running, tokens file or `token` error, unexpected failure |
 
 ## Library

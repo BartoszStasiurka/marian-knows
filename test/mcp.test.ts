@@ -49,7 +49,7 @@ describe("MCP server", () => {
   it("lists the four read-only tools with model-facing descriptions", async () => {
     const { client } = await connect();
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name).sort()).toEqual(["get", "list", "search", "status"]);
+    expect(tools.map((t) => t.name).sort()).toEqual(["get", "list", "search", "status", "tags"]);
     for (const t of tools) expect(t.annotations?.readOnlyHint).toBe(true);
     const search = tools.find((t) => t.name === "search")!;
     expect(search.description).toMatch(/2-4 keywords/);
@@ -160,7 +160,17 @@ describe("MCP server", () => {
       dbSize: expect.any(Number),
       indexedAt: expect.any(String),
       ageSeconds: expect.any(Number),
+      tags: 2,
     });
+  });
+
+  it("tags lists tag names, with counts on request, scoped by path", async () => {
+    const { client } = await connect();
+    expect(parsed(await call(client, "tags"))).toEqual(["hr", "ops"]);
+    expect(parsed(await call(client, "tags", { counts: true, path: ["/ops/"] }))).toEqual([{ tag: "ops", count: 1 }]);
+    const r = await call(client, "tags", { path: ["/nope/"] });
+    expect(parsed(r)).toEqual([]);
+    expect(r.content[1]!.text).toBe("warning: no indexed files under /nope/");
   });
 
   it("a missing index is a tool error, status still answers", async () => {
@@ -171,11 +181,12 @@ describe("MCP server", () => {
     expect(parsed(await call(client, "status"))).toMatchObject({ index: "missing", files: null });
   });
 
-  it("logs search, get and list with source mcp and who local", async () => {
+  it("logs search, get, list and tags with source mcp and who local", async () => {
     const { client, config } = await connect();
     await call(client, "search", { query: "backup", limit: 3 });
     await call(client, "get", { path: "/ops/backup.md#harmonogram" });
     await call(client, "list", { tag: "hr" });
+    await call(client, "tags", { path: ["/ops/"] });
     await call(client, "get", { path: "/x.md" }); // failed calls are not logged
     await call(client, "status"); // status is not logged
     const entries = readQueryLog(config)
@@ -201,6 +212,7 @@ describe("MCP server", () => {
         top: ["/ops/backup.md"],
       },
       { source: "mcp", who: "local", op: "list", query: null, filters: { tag: "hr" }, results: 1, top: ["/hr/urlopy.md"] },
+      { source: "mcp", who: "local", op: "tags", query: null, filters: { paths: ["/ops/"] }, results: 1, top: ["ops"] },
     ]);
   });
 

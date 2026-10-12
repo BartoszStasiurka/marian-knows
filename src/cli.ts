@@ -11,6 +11,7 @@ import {
   initConfig,
   isSessionEntry,
   list as listIndex,
+  listTags,
   loadConfig,
   logQuery,
   parseFile,
@@ -45,11 +46,12 @@ Commands:
   index [--full]        Pull the git source if configured, then sync the index (.marian-knows/<config name>/)
   search <query>        Search the index, one virtual path per line (exit 1: no results)
   list                  List indexed files sorted by path (exit 1: no files)
+  tags                  List tags, most common first (exit 1: no tags)
   get <path>[#anchor]   Print an indexed file, or one section of it, by virtual path
   status                Show project, config and index state
   destroy               Remove this config's index and query logs; the config stays
-  log                   Show the query log (search, get, list, MCP sessions), last 7 days
-  serve [--http]        Run the MCP server over stdio, or over HTTP (tools: search, get, list, status)
+  log                   Show the query log (search, get, list, tags, MCP sessions), last 7 days
+  serve [--http]        Run the MCP server over stdio, or over HTTP (tools: search, get, list, tags, status)
   token add <name>      Create an HTTP access token; it is printed once
   token list            List token names and dates (never the tokens)
   token revoke <name>   Revoke a token; a running server rejects it from the next request on
@@ -57,14 +59,15 @@ Commands:
 
 Options:
   --config <file>          Path to marian-knows.yml (for init: the file to create)
-  --json                   JSON output (scan, parse, search, list, status, log, token list)
+  --json                   JSON output (scan, parse, search, list, tags, status, log, token list)
   --disk                   Include disk paths (scan; diagnostic only)
   --full                   Rebuild the index from scratch (index)
   -n <limit>               Max number of files (search; default 10)
   --exact                  No word trimming, no prefix match, no OR fallback (search)
   --tag <tag>              Only files with this tag (search, list)
-  --path <prefix>          Only this subtree ('/dir/') or file ('/a.md'); repeatable (search, list)
-  --exclude-path <prefix>  Leave out a subtree or file; repeatable (search, list)
+  --counts                 Show the number of files per tag (tags)
+  --path <prefix>          Only this subtree ('/dir/') or file ('/a.md'); repeatable (search, list, tags)
+  --exclude-path <prefix>  Leave out a subtree or file; repeatable (search, list, tags)
   --snippets               Print a snippet under each path, matches in [...] (search)
   --max-chars <n>          Cut the output after n characters, 0 = no limit (get; default 20000)
   --days <n>               Entries from the last n days (log; default 7)
@@ -81,6 +84,7 @@ const OPTIONS = {
   full: { type: "boolean" },
   limit: { type: "string", short: "n" },
   exact: { type: "boolean" },
+  counts: { type: "boolean" },
   tag: { type: "string" },
   path: { type: "string", multiple: true },
   "exclude-path": { type: "string", multiple: true },
@@ -101,6 +105,7 @@ const ARITY: Record<string, number> = {
   parse: 1,
   index: 0,
   list: 0,
+  tags: 0,
   get: 1,
   status: 0,
   destroy: 0,
@@ -230,6 +235,19 @@ function list(values: FilterValues & { config?: string; json?: boolean }): numbe
   return docs.length ? 0 : 1;
 }
 
+function tags(values: FilterValues & { config?: string; counts?: boolean; json?: boolean }): number {
+  const config = requireConfig(values.config);
+  if (!config) return 2;
+  const started = performance.now();
+  const filters = { ...filterOptions(values), counts: values.counts };
+  const { tags, warnings } = listTags(config, filters);
+  warn(warnings);
+  logCli(config, { op: "tags", query: null, filters, paths: tags.map((t) => t.tag), ms: performance.now() - started });
+  if (values.json) console.log(JSON.stringify(values.counts ? tags : tags.map((t) => t.tag)));
+  else for (const t of tags) console.log(values.counts ? `${t.count}  ${t.tag}` : t.tag);
+  return tags.length ? 0 : 1;
+}
+
 function get(ref: string | undefined, values: { config?: string; "max-chars"?: string }): number {
   if (ref === undefined) {
     console.error("error: missing <path>. Usage: marian-knows get <path>[#anchor]");
@@ -308,6 +326,7 @@ function printStatus(s: ProjectStatus): void {
   console.log(`Index: ${s.files} files, ${s.sections} sections, ${formatBytes(s.dbSize ?? 0)}`);
   const age = s.ageSeconds === null ? "" : ` (${formatAge(s.ageSeconds)} ago)`;
   console.log(`Indexed at: ${s.indexedAt ?? "-"}${age}`);
+  console.log(`Tags: ${s.tags ?? 0}`);
 }
 
 function status(values: { config?: string; json?: boolean }): number {
@@ -482,6 +501,8 @@ async function main(argv: string[]): Promise<number> {
         return await search(args, values);
       case "list":
         return list(values);
+      case "tags":
+        return tags(values);
       case "get":
         return get(args[0], values);
       case "status":

@@ -12,7 +12,7 @@ export const NO_LOG_ENV = "MARIAN_KNOWS_NO_LOG";
 export const LOG_TOP = 5;
 
 export type LogSource = "cli" | "mcp";
-export type LogOp = "search" | "get" | "list";
+export type LogOp = "search" | "get" | "list" | "tags";
 export type SessionOp = "connect" | "disconnect";
 
 /** One line of `queries-YYYY-MM-DD.jsonl`. Virtual paths only, never response content or disk paths. */
@@ -23,13 +23,13 @@ export interface QueryLogEntry {
   /** `cli`, `local` (MCP over stdio) or a token name. */
   who: string;
   op: LogOp;
-  /** Search query or `get` reference (`path#anchor`); null for `list`. */
+  /** Search query or `get` reference (`path#anchor`); null for `list` and `tags`. */
   query: string | null;
-  /** Filters actually given (`tag`, `paths`, `excludePaths`, `limit`, `exact`); unset ones are left out. */
+  /** Filters actually given (`tag`, `paths`, `excludePaths`, `limit`, `exact`, `counts`); unset ones are left out. */
   filters: Record<string, unknown>;
-  /** Number of results (files for `search` / `list`, 1 for a served `get`). */
+  /** Number of results (files for `search` / `list`, tags for `tags`, 1 for a served `get`). */
   results: number;
-  /** Up to `LOG_TOP` virtual paths, in result order. */
+  /** Up to `LOG_TOP` virtual paths (tag names for `tags`), in result order. */
   top: string[];
   ms: number;
 }
@@ -92,7 +92,7 @@ export interface QueryRecord {
   op: LogOp;
   query: string | null;
   filters?: object;
-  /** Every result path; the count and the top `LOG_TOP` are taken from it. */
+  /** Every result path (tag name for `tags`); the count and the top `LOG_TOP` are taken from it. */
   paths: string[];
   ms: number;
 }

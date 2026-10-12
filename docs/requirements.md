@@ -184,7 +184,7 @@ marian-knows parse <file> [--json]    # parsowanie pliku wskazanego ścieżką d
 marian-knows index [--full]           # (re)indeksowanie, wcześniej aktualizacja źródła z gita
 marian-knows search <query> [opcje]   # pliki wg rankingu
 marian-knows list [opcje]             # pliki z indeksu, posortowane po ścieżce
-marian-knows tags [opcje]             # tagi z indeksu z liczbą plików
+marian-knows tags [opcje]             # tagi z indeksu (--counts: z liczbą plików)
 marian-knows get <path>[#anchor]      # zawartość pliku albo jednej sekcji z indeksu (ścieżka wirtualna)
 marian-knows status [--json]          # stan projektu: konfiguracja, liczba plików i sekcji, rozmiar, czas i wiek indeksu
 marian-knows destroy                  # usuwa indeks i logi tej konfiguracji (.marian-knows/<nazwa>/); konfiguracja zostaje
@@ -200,7 +200,7 @@ Opcja globalna: `--config <plik>` (dla `init`: plik, który ma zostać utworzony
 | -------- | -------------------------------------------------------------------------------------------------------------- |
 | `search` | `-n <limit>`, `--json`, `--snippets`, `--tag <tag>`, `--exact`, `--path <prefiks>`, `--exclude-path <prefiks>` |
 | `list`   | `--json`, `--tag <tag>`, `--path <prefiks>`, `--exclude-path <prefiks>`                                        |
-| `tags`   | `--json`, `--path <prefiks>`, `--exclude-path <prefiks>`                                                       |
+| `tags`   | `--json`, `--counts`, `--path <prefiks>`, `--exclude-path <prefiks>`                                           |
 | `scan`   | `--json`, `--disk` (dołącza ścieżki dyskowe, wyłącznie diagnostycznie)                                         |
 | `get`    | `--max-chars <n>` (limit znaków odpowiedzi, `0` = bez limitu; sekcja 9)                                        |
 | `log`    | `--zero`, `--days <n>`, `--json` (sekcja 9)                                                                    |
@@ -213,7 +213,7 @@ Opcja globalna: `--config <plik>` (dla `init`: plik, który ma zostać utworzony
 
 **`get <path>`:** wypisuje plik bez zmian (bajty z dysku, bez normalizacji), z zastrzeżeniem limitu znaków (sekcja 9). Obsługuje wyłącznie pliki obecne w indeksie, więc nie odczyta niczego, czego nie pokazuje `list` (plików wykluczonych, ukrytych, spoza `.md`). Ścieżka z końcowym `/`, ścieżka spoza indeksu i plik usunięty po indeksowaniu to błąd (kod 2).
 
-**`tags`:** tagi plików z indeksu, po jednym na linię jako `<liczba plików>  <tag>`, od najczęstszego; przy równej liczbie alfabetycznie. Tagi są grupowane bez rozróżniania wielkości liter, tak jak dopasowuje je `--tag`; wypisywana jest najczęstsza pisownia (przy remisie pierwsza alfabetycznie). `--path` i `--exclude-path` zawężają pliki jak w `list`. Brak tagów to kod 1, brak indeksu to błąd (kod 2), jak w `list`.
+**`tags`:** tagi plików z indeksu, po jednym na linię, od najczęstszego; z `--counts` jako `<liczba plików>  <tag>`; przy równej liczbie alfabetycznie. Tagi są grupowane bez rozróżniania wielkości liter, tak jak dopasowuje je `--tag`; wypisywana jest najczęstsza pisownia (przy remisie pierwsza alfabetycznie). `--path` i `--exclude-path` zawężają pliki jak w `list`. Brak tagów to kod 1, brak indeksu to błąd (kod 2), jak w `list`.
 
 **`status`:** nazwa i opis (`description`) projektu, ścieżka pliku konfiguracji i katalogu źródłowego (diagnostycznie), `exclude`, stan indeksu (`ok`, `missing`, `outdated`), liczba plików i sekcji, rozmiar bazy (`index.db` z `-wal` i `-shm`), czas i wiek indeksowania, liczba różnych tagów. Brak indeksu nie jest błędem (kod 0).
 
@@ -241,8 +241,8 @@ Files: 42
 ```
 
 - **Kontrakt `--json`** (stabilny, korzysta z niego m.in. przyszły MCP): `search` i `list` wypisują gołą tablicę obiektów, po jednym na plik, w kolejności rankingu (`list`: po ścieżce). Bez koperty i `schemaVersion` w v1.
-- `search`: `path`, `title`, `tags` (tablica), `score`, `anchor` (najlepsza sekcja pliku), `heading` (jej nagłówek), `snippet` (wypełniony tylko z `--snippets`). `list`: `path`, `title`, `tags`. `tags`: `{tag, count}`, w tej samej kolejności co wyjście tekstowe. Pola nie są pomijane: brak wartości to `null` (`tags`: `[]`).
-- `status --json`: jeden obiekt `{name, description, config, path, pathExists, exclude, index, files, sections, dbSize, indexedAt, ageSeconds, tags}`; `tags` to tablica `{tag, count}` jak w `tags --json` (wszystkie tagi indeksu); `index` to `ok`, `missing` albo `outdated`, pozostałe pola indeksu są `null`, gdy indeks nie jest `ok`; `description` jest `null`, gdy go nie ustawiono (`dbSize` także przy `outdated`).
+- `search`: `path`, `title`, `tags` (tablica), `score`, `anchor` (najlepsza sekcja pliku), `heading` (jej nagłówek), `snippet` (wypełniony tylko z `--snippets`). `list`: `path`, `title`, `tags`. `tags`: tablica nazw tagów, z `--counts` tablica `{tag, count}`; w tej samej kolejności co wyjście tekstowe. Pola nie są pomijane: brak wartości to `null` (`tags`: `[]`).
+- `status --json`: jeden obiekt `{name, description, config, path, pathExists, exclude, index, files, sections, dbSize, indexedAt, ageSeconds, tags}`; `tags` to liczba różnych tagów indeksu; `index` to `ok`, `missing` albo `outdated`, pozostałe pola indeksu są `null`, gdy indeks nie jest `ok`; `description` jest `null`, gdy go nie ustawiono (`dbSize` także przy `outdated`).
 - `score` to `bm25` (niższa wartość = lepiej), porównywalny tylko w obrębie jednego zapytania.
 - Zmiany dodające pola są zgodne wstecz; usunięcie pola lub zmiana jego znaczenia wymaga podniesienia wersji głównej `marian-knows`.
 - W trybie `--json` stdout zawiera wyłącznie JSON, ostrzeżenia i błędy idą na stderr; brak wyników w `search`, `list` i `tags` to `[]` i kod 1.
@@ -296,7 +296,7 @@ Cel: baza wiedzy dla agentów AI, wystawiona jako serwer MCP w sieci. Jeden serw
 - `search --json` dostaje pole `heading` (nagłówek najlepszej sekcji, `null` dla sekcji 0). Zmiana zgodna wstecz.
 
 **Narzędzia MCP**
-- `search` (query, limit, tag, path, excludePath, exact), `get` (path, opcjonalnie z `#anchor`), `list` (tag, path, excludePath), `status`. Bez osobnego narzędzia do tagów: lista tagów jest w wyniku `status`, który agent woła na starcie, a każde narzędzie to stały koszt tokenów w opisie.
+- `search` (query, limit, tag, path, excludePath, exact), `get` (path, opcjonalnie z `#anchor`), `list` (tag, path, excludePath), `tags` (path, excludePath, counts), `status`. `tags` mówi agentowi, jakie wartości przyjmuje filtr `tag`; `status` podaje tylko liczbę tagów.
 - Wyniki w tym samym kształcie co kontrakt `--json` CLI; wyłącznie ścieżki wirtualne. Wyjątki: `search` zawsze wypełnia `snippet`; `status` pomija ścieżki dyskowe (`config`, `path`); `get` zwraca sam Markdown (z tym samym limitem znaków, bez parametru do jego zmiany).
 - `limit` w `search`: 1–50 (domyślnie 10). `path` i `excludePath` to tablice (jak powtarzalne `--path`).
 - Błędy (zła ścieżka, nieznana kotwica, brak indeksu) to wynik narzędzia z `isError` i komunikatem jak w CLI, nie zerwanie połączenia. Pusty wynik to `[]`, nie błąd. Ostrzeżenia core (zakres bez plików) idą jako drugi blok tekstu `warning: …`.
@@ -309,7 +309,7 @@ Cel: baza wiedzy dla agentów AI, wystawiona jako serwer MCP w sieci. Jeden serw
 **Log zapytań** (wspólny dla CLI i MCP)
 - Pliki `.marian-knows/<nazwa>/logs/queries-YYYY-MM-DD.jsonl`, jeden obiekt JSON na linię.
 - Plik dzienny według daty UTC z `ts`.
-- Wpis: `ts` (ISO 8601, UTC), `source` (`cli` / `mcp`), `who` (`cli` albo nazwa tokenu; `local` dla stdio), `op` (`search` / `get` / `list`), `query` (zapytanie albo `ścieżka#kotwica` dla `get`; `null` dla `list`), `filters` (tylko podane: `tag`, `paths`, `excludePaths`, `limit`, `exact`), `results` (liczba plików; `get`: 1), `top` (do 5 ścieżek wirtualnych), `ms`.
+- Wpis: `ts` (ISO 8601, UTC), `source` (`cli` / `mcp`), `who` (`cli` albo nazwa tokenu; `local` dla stdio), `op` (`search` / `get` / `list` / `tags`), `query` (zapytanie albo `ścieżka#kotwica` dla `get`; `null` dla `list` i `tags`), `filters` (tylko podane: `tag`, `paths`, `excludePaths`, `limit`, `exact`, `counts`), `results` (liczba plików; `tags`: liczba tagów; `get`: 1), `top` (do 5 ścieżek wirtualnych; `tags`: nazw tagów), `ms`.
 - Logowane są wywołania zakończone sukcesem, także bez wyników; błędy (zła ścieżka, brak pliku, brak indeksu) nie.
 - Bez treści odpowiedzi i bez ścieżek dyskowych. Błąd zapisu logu to ostrzeżenie na stderr, nigdy błąd komendy.
 - `MARIAN_KNOWS_NO_LOG=1` (każda niepusta wartość poza `0`) wyłącza log.

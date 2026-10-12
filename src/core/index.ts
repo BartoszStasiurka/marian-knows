@@ -76,6 +76,7 @@ export {
   search,
 } from "./search.js";
 export { status } from "./status.js";
+export { listTags } from "./tags.js";
 export {
   LAST_USE_FLUSH_MS,
   TOKEN_PREFIX,
@@ -113,6 +114,7 @@ export type {
 } from "./log.js";
 export type { PreparedQuery, SearchHit, SearchOptions, SearchResult } from "./search.js";
 export type { ProjectStatus } from "./status.js";
+export type { TagCount, TagsOptions, TagsResult } from "./tags.js";
 export type { TokenEntry, TokenInfo } from "./tokens.js";
 export type { GitSource, IndexResult, LoadedConfig, ParsedDoc, ScanResult, ScannedFile, Section } from "./types.js";
 export { validateVirtualPath } from "./virtual-path.js";

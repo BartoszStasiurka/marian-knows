@@ -493,18 +493,19 @@ describe.concurrent("get sections and limits", () => {
 
 describe.concurrent("query log", () => {
   async function project(): Promise<string> {
-    const dir = makeTree({ "marian-knows.yml": "name: P\n", "a.md": "# A\n\n## Backup\n\nbackup bazy\n", "b.md": "# B" });
+    const dir = makeTree({ "marian-knows.yml": "name: P\n", "a.md": "---\ntags: [ops]\n---\n# A\n\n## Backup\n\nbackup bazy\n", "b.md": "# B" });
     expect((await runCli(["index"], { cwd: dir })).code).toBe(0);
     return dir;
   }
 
-  it("search, get and list are logged; log prints them, --zero and --json filter and format", async () => {
+  it("search, get, list and tags are logged; log prints them, --zero and --json filter and format", async () => {
     const dir = await project();
     const opts = { cwd: dir, log: true };
     await runCli(["search", "backup", "--tag", "x"], opts);
     await runCli(["search", "backup"], opts);
     await runCli(["get", "/a.md#backup"], opts);
     await runCli(["list", "--path", "/a.md"], opts);
+    await runCli(["tags", "--counts"], opts);
     await runCli(["get", "/nope.md"], opts); // errors are not logged
 
     const json = await runCli(["log", "--json"], { cwd: dir });
@@ -515,10 +516,12 @@ describe.concurrent("query log", () => {
       ["search", "backup", 1],
       ["get", "/a.md#backup", 1],
       ["list", null, 1],
+      ["tags", null, 1],
     ]);
     expect(entries[0]).toMatchObject({ source: "cli", who: "cli", filters: { tag: "x" }, top: [] });
     expect(entries[1]).toMatchObject({ filters: {}, top: ["/a.md"], ms: expect.any(Number) });
     expect(entries[3].filters).toEqual({ paths: ["/a.md"] });
+    expect(entries[4]).toMatchObject({ filters: { counts: true }, top: ["ops"] });
     // No disk paths in the log.
     const raw = readdirSync(path.join(dir, ".marian-knows", "marian-knows", "logs")).map((f) =>
       readFileSync(path.join(dir, ".marian-knows", "marian-knows", "logs", f), "utf8"),
@@ -582,6 +585,55 @@ describe.concurrent("query log", () => {
   });
 });
 
+describe.concurrent("tags", () => {
+  async function project(): Promise<string> {
+    const dir = makeTree({
+      "marian-knows.yml": "name: P\n",
+      "b.md": "---\ntags: [ops, dev]\n---\n# B\n",
+      "a/x.md": "---\ntags: [ops]\n---\n# X",
+      "a/draft/y.md": "---\ntags: [Ops, zz]\n---\ny",
+    });
+    expect((await runCli(["index"], { cwd: dir })).code).toBe(0);
+    return dir;
+  }
+
+  it("prints tag names, most common first, then by tag; --counts adds file counts", async () => {
+    const dir = await project();
+    expect(await runCli(["tags"], { cwd: dir })).toMatchObject({ code: 0, stdout: "ops\ndev\nzz\n", stderr: "" });
+    expect((await runCli(["tags", "--counts"], { cwd: dir })).stdout).toBe("3  ops\n1  dev\n1  zz\n");
+  });
+
+  it("--json, --path, --exclude-path", async () => {
+    const dir = await project();
+    expect(JSON.parse((await runCli(["tags", "--json"], { cwd: dir })).stdout)).toEqual(["ops", "dev", "zz"]);
+    const r = await runCli(["tags", "--json", "--counts", "--path", "/a/"], { cwd: dir });
+    expect(r.code).toBe(0);
+    // One "ops" and one "Ops": a tie goes to the first in code point order.
+    expect(JSON.parse(r.stdout)).toEqual([
+      { tag: "Ops", count: 2 },
+      { tag: "zz", count: 1 },
+    ]);
+    const excluded = await runCli(["tags", "--exclude-path", "/a/draft/"], { cwd: dir });
+    expect(excluded.stdout).toBe("ops\ndev\n");
+  });
+
+  it("no tags: exit 1 ([] with --json); scope warning on stderr", async () => {
+    const dir = await project();
+    const [none, scope] = await Promise.all([
+      runCli(["tags", "--path", "/nope/"], { cwd: dir }),
+      runCli(["tags", "--json", "--path", "/c.md"], { cwd: dir }),
+    ]);
+    expect(none).toMatchObject({ code: 1, stdout: "", stderr: "! warning: no indexed files under /nope/\n" });
+    expect(scope).toMatchObject({ code: 1, stdout: "[]\n", stderr: "! warning: not in the index: /c.md\n" });
+  });
+
+  it("missing index or invalid path: exit 2", async () => {
+    const dir = makeTree({ "marian-knows.yml": "name: P\n", "a.md": "a" });
+    expect(await runCli(["tags"], { cwd: dir })).toMatchObject({ code: 2, stderr: "No index. Run: marian-knows index\n" });
+    expect((await runCli(["tags", "--path", "/a//"], { cwd: dir })).code).toBe(2);
+  });
+});
+
 describe.concurrent("status", () => {
   it("shows config and a missing index, exit 0", async () => {
     const dir = makeTree({ "marian-knows.yml": "name: Baza\n" });
@@ -594,10 +646,14 @@ describe.concurrent("status", () => {
   });
 
   it("shows counts, size and index age; --json has every field", async () => {
-    const dir = makeTree({ "marian-knows.yml": "name: Baza\nexclude: draft/**\n", "a.md": "# A", "b.md": "b" });
+    const dir = makeTree({
+      "marian-knows.yml": "name: Baza\nexclude: draft/**\n",
+      "a.md": "---\ntags: [ops, dev]\n---\n# A",
+      "b.md": "---\ntags: [Ops]\n---\nb",
+    });
     expect((await runCli(["index"], { cwd: dir })).code).toBe(0);
     const text = await runCli(["status"], { cwd: dir });
-    expect(text.stdout).toMatch(/\nIndex: 2 files, 1 sections, [\d.]+ (B|KB|MB)\nIndexed at: \S+ \(\d+ s ago\)\n$/);
+    expect(text.stdout).toMatch(/\nIndex: 2 files, 1 sections, [\d.]+ (B|KB|MB)\nIndexed at: \S+ \(\d+ s ago\)\nTags: 2\n$/);
     const json = JSON.parse((await runCli(["status", "--json"], { cwd: dir })).stdout);
     expect(json).toEqual({
       name: "Baza",
@@ -612,13 +668,14 @@ describe.concurrent("status", () => {
       dbSize: expect.any(Number),
       indexedAt: expect.any(String),
       ageSeconds: expect.any(Number),
+      tags: 2,
     });
   });
 
   it("--json with a missing index: nulls", async () => {
     const r = await runCli(["status", "--json"], { cwd: makeTree({ "marian-knows.yml": "name: P\n" }) });
     expect(r.code).toBe(0);
-    expect(JSON.parse(r.stdout)).toMatchObject({ index: "missing", files: null, sections: null, dbSize: null, indexedAt: null });
+    expect(JSON.parse(r.stdout)).toMatchObject({ index: "missing", files: null, sections: null, dbSize: null, indexedAt: null, tags: null });
   });
 
   it("without a config: exit 2", async () => {

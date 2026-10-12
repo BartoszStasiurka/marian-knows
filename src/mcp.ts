@@ -11,6 +11,7 @@ import {
   TokenVerifier,
   get as getRef,
   list as listIndex,
+  listTags,
   logAccess,
   logQuery,
   logSession,
@@ -62,7 +63,7 @@ export interface McpOptions {
 }
 
 const scopeShape = {
-  tag: z.string().optional().describe("Only files with this tag (case-insensitive)."),
+  tag: z.string().optional().describe("Only files with this tag (case-insensitive); the tags tool lists them."),
   path: z
     .array(z.string())
     .optional()
@@ -95,7 +96,7 @@ const filterOptions = (args: { tag?: string; path?: string[]; excludePath?: stri
 });
 
 /**
- * MCP server over the core: `search`, `get`, `list`, `status`, read-only, virtual paths only.
+ * MCP server over the core: `search`, `get`, `list`, `tags`, `status`, read-only, virtual paths only.
  * Results follow the CLI `--json` contract; `status` leaves out the disk paths.
  */
 export function createMcpServer(config: LoadedConfig, options: McpOptions): McpServer {
@@ -221,11 +222,34 @@ directory or a tag when you do not know what to search for; filter with path, ex
   );
 
   server.registerTool(
+    "tags",
+    {
+      title: "List tags",
+      description: `Lists the tags of indexed files, most common first, as a JSON array of names; with counts, as
+[{tag, count}] (count = number of files). Use it to learn what the tag filter of search and list accepts.`,
+      inputSchema: {
+        path: scopeShape.path,
+        excludePath: scopeShape.excludePath,
+        counts: z.boolean().optional().describe("Add the number of files per tag."),
+      },
+      annotations,
+    },
+    (args) =>
+      counted(() => {
+        const started = performance.now();
+        const filters = { ...filterOptions(args), counts: args.counts };
+        const { tags, warnings } = listTags(config, filters);
+        log({ op: "tags", query: null, filters, paths: tags.map((t) => t.tag), ms: performance.now() - started });
+        return json(args.counts ? tags : tags.map((t) => t.tag), warnings);
+      }),
+  );
+
+  server.registerTool(
     "status",
     {
       title: "Knowledge base status",
       description: `Shows the knowledge base name and index state as JSON: index ('ok', 'missing', 'outdated'), number
-of files and sections, index time and age in seconds. Use it when results look stale or empty.`,
+of files, sections and distinct tags, index time and age in seconds. Use it when results look stale or empty.`,
       annotations,
     },
     () =>

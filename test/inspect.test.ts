@@ -14,6 +14,7 @@ import {
   getSection,
   indexPath,
   list,
+  listTags,
   loadConfig,
   parseDocRef,
   rebuildIndex,
@@ -72,6 +73,40 @@ describe("list", () => {
     const config = loadConfig(path.join(dir, "marian-knows.yml"));
     expect(() => list(config, { paths: ["/a//b/"] })).toThrow(InvalidPathError);
     expect(() => list(config)).toThrow(IndexMissingError);
+  });
+});
+
+describe("listTags", () => {
+  it("counts files per tag, grouped case-insensitively, most common spelling shown", async () => {
+    const { config } = await indexed({
+      "a.md": tagged("Ops, dev"),
+      "b.md": tagged("ops"),
+      "c.md": tagged("ops, Dev"),
+      "d.md": tagged("beta"),
+      "e.md": "no tags",
+    });
+    expect(listTags(config)).toEqual({
+      tags: [
+        { tag: "ops", count: 3 },
+        // One "dev", one "Dev": a tie goes to the first in code point order.
+        { tag: "Dev", count: 2 },
+        { tag: "beta", count: 1 },
+      ],
+      warnings: [],
+    });
+    expect(status(config).tags).toBe(3);
+  });
+
+  it("equal counts sort by tag, ignoring case", async () => {
+    const { config } = await indexed({ "a.md": tagged("b, C, a") });
+    expect(listTags(config).tags.map((t) => t.tag)).toEqual(["a", "b", "C"]);
+  });
+
+  it("filters by --path and --exclude-path, warns about an empty scope", async () => {
+    const { config } = await indexed({ "srv/a.md": tagged("ops"), "srv/draft/b.md": tagged("draft"), "c.md": tagged("hr") });
+    expect(listTags(config, { paths: ["/srv/"], excludePaths: ["/srv/draft/"] }).tags).toEqual([{ tag: "ops", count: 1 }]);
+    expect(listTags(config, { paths: ["/nope/"] })).toEqual({ tags: [], warnings: ["no indexed files under /nope/"] });
+    expect(() => listTags(config, { paths: ["/a//b/"] })).toThrow(InvalidPathError);
   });
 });
 
@@ -198,6 +233,7 @@ describe("status", () => {
       dbSize: null,
       indexedAt: null,
       ageSeconds: null,
+      tags: null,
     });
   });
 
@@ -205,7 +241,7 @@ describe("status", () => {
     const { config } = await indexed({ "a.md": "# A\n\n## S1\n\n" + "x".repeat(300) + "\n\n## S2\n\n" + "y".repeat(300), "b.md": "b" });
     const s = status(config);
     const now = new Date(Date.parse(s.indexedAt!) + 90_000);
-    expect(status(config, now)).toMatchObject({ index: "ok", files: 2, sections: 3, ageSeconds: 90 });
+    expect(status(config, now)).toMatchObject({ index: "ok", files: 2, sections: 3, ageSeconds: 90, tags: 0 });
     expect(s.dbSize).toBeGreaterThan(0);
   });
 

@@ -234,15 +234,16 @@ Spec: `docs/superpowers/specs/2026-10-08-git-source-design.md`. Comes before 13:
 - [x] Deploy key: generated when missing, used through `GIT_SSH_COMMAND`, host keys in `<deployKey>.known_hosts`
 - [x] Docker entrypoint without git logic; `compose.yml` copied without edits
 
-## 16. Tag list
+## 16. Tag list (done)
 
 Agents get a `tag` filter but no way to learn which tags exist.
 
-- [ ] Core `listTags()`: `{tag, count}` over indexed files, grouped case-insensitively like `--tag`, most common
+- [x] Core `listTags()`: `{tag, count}` over indexed files, grouped case-insensitively like `--tag`, most common
   spelling wins; sorted by count, then by tag; `--path` / `--exclude-path` scope
-- [ ] `tags` command (`--json`, exit 1 when there are no tags)
-- [ ] `tags` field in `status --json` and the MCP `status` tool; the text `status` shows the number of distinct tags;
-  no separate MCP tool
+- [x] `tags` command: tag names, `--counts` adds file counts (`--json`, exit 1 when there are no tags)
+- [x] MCP `tags` tool (`path`, `excludePath`, `counts`)
+- [x] `tags` in the query log (CLI and MCP): `op: tags`, `results` = number of tags, `top` = tag names
+- [x] `status` (text, `--json`, MCP) shows only the number of distinct tags
 
 ## Later (not planned)
 
