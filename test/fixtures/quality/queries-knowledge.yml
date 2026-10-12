@@ -1,0 +1,60 @@
+# Product questions against ../../../knowledge, the product's own documentation.
+# Guards both the docs (a page that stops answering its question) and search (a ranking regression).
+# Same format as queries.yml.
+
+- query: install better-sqlite3 toolchain
+  expect: /getting-started/install.md
+- query: How do I connect Claude Code to my knowledge base?
+  expect: /getting-started/connect-an-agent.md
+- query: agent does not use the knowledge base description
+  expect: [/getting-started/connect-an-agent.md, /troubleshooting.md]
+- query: create first index
+  expect: /getting-started/quick-start.md
+- query: How do I revoke a token?
+  expect: [/reference/commands/token.md, /guides/serve-over-http.md]
+- query: reverse proxy HTTPS caddy
+  expect: /guides/serve-over-http.md
+- query: clone knowledge from a git repository
+  expect: /guides/git-source.md
+- query: deploy key
+  expect: [/guides/git-source.md, /guides/docker.md]
+- query: sparse checkout git.path
+  expect: [/guides/git-source.md, /reference/config.md]
+- query: docker compose restart update
+  expect: /guides/docker.md
+- query: rollback to a previous image version
+  expect: /guides/docker.md
+- query: queries with no results
+  expect: [/guides/finding-gaps.md, /reference/commands/log.md]
+- query: frontmatter title tags
+  expect: /guides/writing-a-knowledge-base.md
+- query: How are Polish word endings matched?
+  expect: /concepts/how-search-works.md
+- query: ranking weights bm25
+  expect: /concepts/how-search-works.md
+- query: what is a virtual path
+  expect: /concepts/virtual-paths.md
+- query: read one section by anchor
+  expect: [/concepts/sections-and-anchors.md, /reference/commands/get.md]
+- query: index is already running lock
+  expect: [/concepts/index-lifecycle.md, /troubleshooting.md]
+- query: prompt injection write access
+  expect: /concepts/security.md
+- query: exclude globs config
+  expect: /reference/config.md
+- query: sync minutes refresh serve
+  expect: [/reference/config.md, /reference/commands/serve.md, /concepts/index-lifecycle.md]
+- query: MCP tools arguments
+  expect: /reference/mcp-tools.md
+- query: search json fields score anchor
+  expect: /reference/json-output.md
+- query: exit code 1
+  expect: /reference/exit-codes.md
+- query: turn off the query log environment variable
+  expect: [/reference/environment.md, /guides/finding-gaps.md]
+- query: Permission denied publickey
+  expect: [/troubleshooting.md, /guides/git-source.md]
+- query: agent gets 401
+  expect: [/troubleshooting.md, /guides/serve-over-http.md]
+- query: remove the index
+  expect: [/reference/commands/destroy.md, /concepts/index-lifecycle.md]
