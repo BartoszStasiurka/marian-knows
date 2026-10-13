@@ -4,15 +4,40 @@
   "description": "Markdown knowledge base with full-text search (SQLite FTS5), CLI first.",
   "type": "module",
   "license": "MIT",
-  "engines": { "node": ">=20" },
-  "bin": { "marian-knows": "dist/cli.js" },
+  "author": "Bartosz Stasiurka <bstasiurka@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BartoszStasiurka/marian-knows.git"
+  },
+  "homepage": "https://github.com/BartoszStasiurka/marian-knows#readme",
+  "bugs": {
+    "url": "https://github.com/BartoszStasiurka/marian-knows/issues"
+  },
+  "keywords": [
+    "markdown",
+    "knowledge-base",
+    "full-text-search",
+    "sqlite",
+    "fts5",
+    "mcp",
+    "mcp-server",
+    "cli"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "marian-knows": "dist/cli.js"
+  },
   "exports": {
     "./core": {
       "types": "./dist/core/index.d.ts",
       "import": "./dist/core/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "dev": "tsx src/cli.ts",
     "build": "tsc -p tsconfig.build.json",
