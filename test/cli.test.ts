@@ -133,6 +133,13 @@ describe.concurrent("help and unknown commands", () => {
     },
   );
 
+  it.each([["version"], ["--version"]].map((args) => ({ args })))("$args prints the package version", async ({ args }) => {
+    const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
+    const r = await runCli(args, { cwd: makeTree() });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toBe(`${version}\n`);
+  });
+
   it("prints usage and exits 2 without a command", async () => {
     const r = await runCli([], { cwd: makeTree() });
     expect(r.code).toBe(2);

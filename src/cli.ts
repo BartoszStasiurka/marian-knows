@@ -32,7 +32,7 @@ import {
   revokeToken,
   tokensPath,
 } from "./core/index.js";
-import { serveHttp, serveStdio } from "./mcp.js";
+import { VERSION, serveHttp, serveStdio } from "./mcp.js";
 
 const DEFAULT_PORT = 3000;
 const DEFAULT_HOST = "127.0.0.1";
@@ -55,6 +55,7 @@ Commands:
   token add <name>      Create an HTTP access token; it is printed once
   token list            List token names and dates (never the tokens)
   token revoke <name>   Revoke a token; a running server rejects it from the next request on
+  version               Print the version
   help                  Show this help
 
 Options:
@@ -75,6 +76,7 @@ Options:
   --http                   Serve MCP over Streamable HTTP at /mcp, bearer token required (serve)
   --port <n>               HTTP port (serve --http; default ${DEFAULT_PORT}, 0 = any free port)
   --host <addr>            HTTP listen address (serve --http; default ${DEFAULT_HOST}, 0.0.0.0 = all)
+  --version                Print the version
   -h, --help               Show this help`;
 
 const OPTIONS = {
@@ -95,6 +97,7 @@ const OPTIONS = {
   http: { type: "boolean" },
   port: { type: "string" },
   host: { type: "string" },
+  version: { type: "boolean" },
   help: { type: "boolean", short: "h" },
 } as const;
 
@@ -475,6 +478,11 @@ async function main(argv: string[]): Promise<number> {
 
   const { values, positionals } = parsed;
   const [command, ...args] = positionals;
+
+  if (values.version || command === "version") {
+    console.log(VERSION);
+    return 0;
+  }
 
   if (values.help || command === "help" || !command) {
     console.log(USAGE);

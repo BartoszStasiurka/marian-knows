@@ -24,6 +24,7 @@ marian-knows <command> [options]
 | [`log`](log.md)                  | Show the query log and MCP sessions                                   |
 | [`serve`](serve.md)              | Run the MCP server over stdio or HTTP                                 |
 | [`token`](token.md)              | Manage HTTP access tokens                                             |
+| `version`                        | Print the version (also `--version`)                                  |
 | `help`                           | Show help (also `--help`, `-h`)                                       |
 
 ## Global option

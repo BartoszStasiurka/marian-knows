@@ -35,7 +35,8 @@ export const SHUTDOWN_GRACE_MS = 8000;
 /** Most files one `search` call may return; keeps a careless limit from flooding the agent's context. */
 export const MCP_MAX_LIMIT = 50;
 
-const VERSION = (
+/** Package version, read from package.json (same relative path from src/ and dist/). */
+export const VERSION = (
   JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }
 ).version;
 
